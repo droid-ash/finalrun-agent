@@ -167,8 +167,8 @@ const launchAppGrounderSchema = z.union([
       allowAllPermissions: z.boolean().optional(),
       stopAppBeforeLaunch: z.boolean().optional(),
       shouldUninstallBeforeLaunch: z.boolean().optional(),
-      permissions: z.record(z.string(), z.string()).optional(),
-      arguments: z.record(z.string(), z.string()).optional(),
+      permissions: z.object({}).passthrough().optional(),
+      arguments: z.object({}).passthrough().optional(),
     })
     .passthrough(),
 ]);
