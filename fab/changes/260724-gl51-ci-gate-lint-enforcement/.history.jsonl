@@ -1,0 +1,10 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-24T16:20:01Z"}
+{"args":"TDD foundation: add PR-triggered CI test gate + ESLint rules encoding code-quality principles (max-lines-per-function 60, max-depth 4, complexity, re-enable no-unused-vars/prefer-const) as warn. No refactoring.","cmd":"fab-new","event":"command","ts":"2026-07-24T16:20:01Z"}
+{"delta":"+4.4","event":"confidence","score":4.4,"trigger":"calc-score","ts":"2026-07-24T16:21:54Z"}
+{"delta":"+0.0","event":"confidence","score":4.4,"trigger":"calc-score","ts":"2026-07-24T16:30:08Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-24T16:36:22Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-24T16:37:59Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-24T17:04:00Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-24T17:10:16Z"}
+{"event":"review","result":"passed","ts":"2026-07-24T17:10:16Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-24T17:13:06Z"}

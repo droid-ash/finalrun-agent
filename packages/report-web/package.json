@@ -33,7 +33,7 @@
     "build:lib": "tsup && node scripts/build-styles.mjs",
     "build": "npm run build:lib && npm run build:app",
     "preview": "vite preview",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "node ./scripts/runTests.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

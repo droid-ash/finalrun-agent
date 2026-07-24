@@ -1082,7 +1082,7 @@ test('finalrun runs prints a console summary and suggests starting the local rep
     );
     assert.match(
       result.stdout,
-      new RegExp(`${path.basename(workspace.rootDir).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\"`),
+      new RegExp(`${path.basename(workspace.rootDir).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`),
     );
     assert.equal(result.stderr, '');
   } finally {

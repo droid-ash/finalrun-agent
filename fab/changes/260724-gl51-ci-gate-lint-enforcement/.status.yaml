@@ -1,0 +1,51 @@
+id: gl51
+name: 260724-gl51-ci-gate-lint-enforcement
+created: 2026-07-24T16:20:01Z
+created_by: droid-ash
+change_type: ci
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 11
+    acceptance_count: 20
+    acceptance_completed: 20
+confidence:
+    certain: 8
+    confident: 5
+    tentative: 0
+    unresolved: 0
+    score: 4.4
+    fuzzy: true
+    dimensions:
+        signal: 80.0
+        reversibility: 82.3
+        competence: 79.6
+        disambiguation: 79.6
+stage_metrics:
+    intake: {started_at: "2026-07-24T16:20:01Z", driver: fab-new, iterations: 1, completed_at: "2026-07-24T16:36:22Z"}
+    apply: {started_at: "2026-07-24T16:36:22Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-24T17:04:00Z"}
+    review: {started_at: "2026-07-24T17:04:00Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-24T17:10:16Z"}
+    hydrate: {started_at: "2026-07-24T17:10:16Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-24T17:13:06Z"}
+    ship: {started_at: "2026-07-24T17:13:06Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-24T17:13:06Z"
+    computed_at_stage: hydrate
+summary: Add PR CI gate (build → test → lint) and encode four code-quality principles as ESLint warnings
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-24T17:13:06Z

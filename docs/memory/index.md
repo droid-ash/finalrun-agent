@@ -17,6 +17,7 @@ fkf_version: "0.1"
 
 | Domain | Description |
 |--------|-------------|
+| [ci](ci/index.md) | PR quality gate (build → test → lint) and the explicit-discovery test-runner contract for the Node-20.19 floor |
 | [cli](cli/index.md) | CLI orchestration, report writing, HTML generation |
 | [device-node](device-node/index.md) | Device interaction via gRPC: lifecycle, recording, log capture |
 | [report-web](report-web/index.md) | Next.js report viewer for test run results |

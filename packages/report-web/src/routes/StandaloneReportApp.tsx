@@ -140,7 +140,6 @@ function useAsyncResource<T>(load: () => Promise<T>, deps: unknown[]): AsyncStat
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
   return state;
