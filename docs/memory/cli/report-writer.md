@@ -1,3 +1,7 @@
+---
+type: memory
+description: "ReportWriter artifact handling including device log copy and redaction"
+---
 # Report Writer (cli)
 
 `ReportWriter` (`packages/cli/src/reportWriter.ts`) handles copying test artifacts into the report directory and building `TestResult` records for `run.json`.

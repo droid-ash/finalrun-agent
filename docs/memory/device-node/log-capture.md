@@ -1,3 +1,7 @@
+---
+type: memory
+description: "Per-test device log capture: manager, providers, Device integration"
+---
 # Log Capture (device-node)
 
 Per-test device log capture for Android (logcat) and iOS (simctl log stream), mirroring the recording pipeline architecture.
