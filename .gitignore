@@ -44,15 +44,16 @@ pnpm-debug.log*
 .DS_Store
 .idea/
 .vscode/
-.claude/
+# Ignore .claude/ EXCEPT committed slash-commands (team-shared); fab-deployed
+# skills stay local and are redeployed by `fab sync`. Everything else stays local.
+/.claude/*
+!/.claude/commands/
 .codex/
 .cursor/
 
 .fab-*
 
 /.agents
-
-/.claude
 
 /.cursor
 
