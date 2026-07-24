@@ -62,3 +62,7 @@ pnpm-debug.log*
 
 /.gemini
 dist/
+
+!fab/.fab-version
+
+.status.yaml.lock

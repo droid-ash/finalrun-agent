@@ -1,3 +1,7 @@
+---
+type: memory
+description: "HTML rendering including inline device log viewer"
+---
 # Renderers (report-web)
 
 `renderers.ts` (`packages/report-web/src/renderers.ts`) generates HTML for the test report viewer. `artifacts.ts` handles manifest loading and artifact resolution.
