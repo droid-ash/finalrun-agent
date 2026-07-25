@@ -1,7 +1,6 @@
 # Dependencies
 node_modules/
 packages/*/node_modules/
-package-lock.json
 
 # TypeScript build output
 packages/*/dist/

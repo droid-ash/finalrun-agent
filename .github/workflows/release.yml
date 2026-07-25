@@ -91,11 +91,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19'
-          # No cache: 'npm' — this repo intentionally does not commit
-          # package-lock.json (.gitignore line 4), so setup-node's npm
-          # cache feature has nothing to key on.
-      # Same reason `npm install` instead of `npm ci`: ci requires a lockfile.
-      - run: npm install
+          cache: 'npm'
+      # npm ci installs the exact committed package-lock.json tree, so any two
+      # builds of the SAME commit resolve identically. Note this job checks out
+      # a branch ref (mutable), not a pinned SHA — a re-run picks up whatever
+      # that branch points at now, so reproducibility is per-commit, not
+      # per-tag-rerun.
+      - run: npm ci
 
       - uses: oven-sh/setup-bun@v2
         with:

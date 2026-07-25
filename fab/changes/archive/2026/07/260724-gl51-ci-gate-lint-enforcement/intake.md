@@ -256,4 +256,4 @@ workspaces).
 | 12 | Certain | Do NOT add Prettier `format:check` to CI in this change | Clarified — user chose "skip it"; formatting stays ungated for the foundation, addable in a follow-up | S:95 R:85 A:85 D:90 |
 | 13 | Certain | Do NOT add DRY copy-paste detection (jscpd) in this change | Clarified — user chose "defer"; avoids a new dependency (YAGNI); `complexity: 12` remains the DRY-adjacent signal | S:95 R:85 A:80 D:90 |
 
-13 assumptions (8 certain, 5 confident, 0 tentative, 0 unresolved).
+13 assumptions (6 certain, 5 confident, 2 tentative, 0 unresolved).

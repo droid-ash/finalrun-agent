@@ -10,6 +10,8 @@ cd finalrun-agent
 npm ci
 ```
 
+`package-lock.json` is committed and CI installs with `npm ci`, so any change to dependencies must include the updated lockfile in the same commit.
+
 End-user install (binary, not npm):
 
 ```sh

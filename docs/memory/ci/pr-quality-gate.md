@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion."
+description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion."
 ---
 # PR Quality Gate (ci)
 
@@ -8,20 +8,25 @@ description: "PR CI gate runs build → test → lint via .github/workflows/ci.y
 
 ## Overview
 
-The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `pull_request` targeting `main` (and on `push` to `main` as a post-merge safety net) and is the first automated gate the repo has. The non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
+The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `pull_request` targeting `main` (and on `push` to `main` as a post-merge safety net) and is the first automated gate the repo has. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
 
 ## Requirements
 
 ### Requirement: PR CI gate stages
-`.github/workflows/ci.yml` MUST run, in order, `npm install` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (package `test` scripts run against compiled `dist/` output). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
+`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (package `test` scripts run against compiled `dist/` output). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
 
 #### Scenario: PR with only lint warnings stays green
 - **GIVEN** a PR whose code violates only the `warn`-severity code-quality rules
 - **WHEN** the CI workflow runs
 - **THEN** `npm run lint` exits 0 and the run passes; only a failing test fails the run
 
-### Requirement: No committed lockfile — install, never `npm ci`
-`package-lock.json` is gitignored, so CI MUST use `npm install` (never `npm ci`, which requires a lockfile) and setup-node MUST NOT enable `cache: 'npm'` (nothing to key on). This mirrors `release.yml`.
+### Requirement: Committed lockfile — reproducible `npm ci` installs
+`package-lock.json` is committed at the repo root (one lockfile covers every workspace; `lockfileVersion` 3, installable by the npm 10 bundled with the pinned Node 20.19). Both `.github/workflows/ci.yml` and `release.yml` MUST install with `npm ci` (never `npm install`, which re-resolves caret ranges afresh and makes red/green depend on registry state), and their setup-node steps MUST enable `cache: 'npm'` (keyed on the lockfile). Dependency changes MUST land the updated lockfile in the same commit — `npm ci` fails loudly when `package.json` and the lockfile disagree.
+
+#### Scenario: upstream in-range release cannot break CI
+- **GIVEN** an upstream dependency publishes a new version inside an existing caret range
+- **WHEN** CI runs on an unchanged commit
+- **THEN** `npm ci` installs the exact locked tree and the run's outcome is unchanged
 
 ### Requirement: Code-quality principles encoded as ESLint warnings
 `eslint.config.mjs` encodes four code-quality principles at `warn` severity on the TS/TSX source block (`**/*.{ts,tsx,mts,cts}`): `max-lines-per-function` (`{ max: 60, skipBlankLines: true, skipComments: true, IIFEs: true }`), `max-depth` (`4`), `complexity` (`12`), plus re-enabled `@typescript-eslint/no-unused-vars` (`^_`-prefix ignore) and `prefer-const`. `@typescript-eslint/no-explicit-any` stays `off`. Severity is `warn` (not `error`) so the gate lands without breaking the pre-existing oversized functions; violations are visible in `npm run lint` output.
@@ -43,6 +48,18 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 - **THEN** it propagates the runner's real non-zero exit code
 
 ## Design Decisions
+
+### The lockfile freezes the resolution CI proved green
+**Decision**: `package-lock.json` pins the dependency tree that was already verified green end-to-end (build, 348 tests, lint 0 errors) — including `@ai-sdk/anthropic` 3.0.101 — rather than a fresh re-resolution of the declared caret ranges.
+**Why**: Re-resolving at lock time re-floats every caret range, which is the exact drift a lockfile exists to eliminate; freezing a known-green tree makes the lockfile a pure reproducibility guarantee with no behavioral delta to review. 3.0.101 is also the version whose `AnthropicLanguageModelOptions` shape forced the provider-options widening at the `generateText` boundary in `packages/goal-executor/src/ai/AIAgent.ts` — that widening is version-agnostic and still guards deliberate upgrades.
+**Rejected**: (a) deleting the lockfile and re-resolving from the registry — discards a verified resolution and re-floats every range for no benefit; (b) pinning back to a pre-3.0.101 `@ai-sdk/anthropic` — changing a locked version *is* a dependency change, which belongs in its own reviewable commit, not in the commit that introduces the lock.
+*Introduced by*: 260725-358i-lockfile-reproducible-installs
+
+### `lockfileVersion` 3 is the npm-compatibility contract
+**Decision**: The committed lockfile declares `lockfileVersion: 3`, and that field is verified on the generated file rather than the lockfile being regenerated under CI's npm.
+**Why**: Lockfiles are generated locally on npm 11 (Node 24) but installed by the npm 10 bundled with the pinned Node 20.19 — the `engines.node >= 20.19.0` floor. npm 11 still emits `lockfileVersion` 3, the same format npm 10 reads and writes, so one file serves both; a lockfile demanding a newer npm would break the very gate it protects. The clean-tree `npm ci` proof and CI itself re-verify this on every dependency change.
+**Rejected**: Regenerating under npm 10 defensively — unnecessary once the emitted version is checked, and it would re-resolve the tree the lockfile deliberately freezes.
+*Introduced by*: 260725-358i-lockfile-reproducible-installs
 
 ### Lint rules land as warnings, not errors
 **Decision**: The four code-quality rules land at `warn` severity, not `error`.

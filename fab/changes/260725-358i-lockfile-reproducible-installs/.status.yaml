@@ -1,0 +1,53 @@
+id: 358i
+name: 260725-358i-lockfile-reproducible-installs
+created: 2026-07-25T15:03:42Z
+created_by: ashish-noon
+change_type: ci
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: done
+    review-pr: done
+plan:
+    generated: true
+    task_count: 8
+    acceptance_count: 11
+    acceptance_completed: 11
+confidence:
+    certain: 10
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 5.0
+    fuzzy: true
+    dimensions:
+        signal: 81.8
+        reversibility: 81.8
+        competence: 87.3
+        disambiguation: 85.5
+stage_metrics:
+    intake: {started_at: "2026-07-25T15:03:42Z", driver: fab-new, iterations: 1, completed_at: "2026-07-25T15:35:01Z"}
+    apply: {started_at: "2026-07-25T15:35:01Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T15:42:24Z"}
+    review: {started_at: "2026-07-25T15:42:24Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T15:51:13Z"}
+    hydrate: {started_at: "2026-07-25T15:51:13Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T15:55:19Z"}
+    ship: {started_at: "2026-07-25T15:55:19Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T15:58:25Z"}
+    review-pr: {started_at: "2026-07-25T15:58:25Z", driver: git-pr, iterations: 1, completed_at: "2026-07-25T16:09:10Z"}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/152
+change_type_source: explicit
+true_impact:
+    added: 7338
+    deleted: 22
+    net: 7316
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-25T15:58:25Z"
+    computed_at_stage: ship
+summary: 'ci: commit package-lock.json and switch ci.yml/release.yml to reproducible npm ci installs'
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-25T16:09:10Z

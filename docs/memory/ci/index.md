@@ -1,5 +1,5 @@
 ---
-description: "PR quality gate (build → test → lint) and the explicit-discovery test-runner contract for the Node-20.19 floor"
+description: "PR quality gate (`npm ci` → build → test → lint), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
 ---
 # Ci Documentation
 
@@ -7,4 +7,4 @@ description: "PR quality gate (build → test → lint) and the explicit-discove
 
 | File | Description |
 |------|-------------|
-| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion. |
+| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion. |

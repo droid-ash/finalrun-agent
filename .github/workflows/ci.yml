@@ -28,12 +28,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19'
-          # No cache: 'npm' — this repo intentionally does not commit
-          # package-lock.json (.gitignore), so setup-node's npm cache
-          # feature has nothing to key on. (Mirrors release.yml.)
+          cache: 'npm'
 
-      # Same reason `npm install` instead of `npm ci`: ci requires a lockfile.
-      - run: npm install
+      # npm ci installs the exact committed package-lock.json tree and fails
+      # loudly if package.json and the lockfile disagree. (Mirrors release.yml.)
+      - run: npm ci
 
       # Package test scripts run against compiled output (dist/), so the
       # build must happen before tests.
