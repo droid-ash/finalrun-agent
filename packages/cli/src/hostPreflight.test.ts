@@ -154,8 +154,10 @@ test('warning-only results do not block a local run', async () => {
   assert.equal(hasBlockingPreflightFailures(result), false);
   assert.equal(shouldBlockLocalRunPreflight(result), false);
   const report = formatHostPreflightReport(result, 'doctor');
-  assert.match(report, /Warnings/);
-  assert.match(report, /ffmpeg/);
+  // The doctor report is a flat ✓/✗/⚠ list — warnings are marked inline
+  // rather than grouped under a "Warnings" heading.
+  assert.match(report, /⚠ ffmpeg — Used to compress iOS recordings after capture\./);
+  assert.doesNotMatch(report, /✗ /);
 });
 
 test('runHostPreflight only evaluates the requested platform scope', async () => {

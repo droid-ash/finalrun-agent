@@ -286,8 +286,8 @@ test('runDoctorCommand reports missing Android blockers', async () => {
   );
 
   assert.equal(result.success, false);
-  assert.match(printed, /Setup Required/);
-  assert.match(printed, /adb/);
+  assert.match(printed, /✗ adb/);
+  assert.match(printed, /Required to communicate with Android devices\./);
 });
 
 test('runDoctorCommand reports missing iOS blockers', async () => {
@@ -318,11 +318,11 @@ test('runDoctorCommand reports missing iOS blockers', async () => {
   );
 
   assert.equal(result.success, false);
-  assert.match(printed, /Setup Required/);
-  assert.match(printed, /xcrun/);
+  assert.match(printed, /✗ xcrun/);
+  assert.match(printed, /Required to access iOS simulator tooling\./);
 });
 
-test('runDoctorCommand defaults to both platforms on mac and prints warnings separately', async () => {
+test('runDoctorCommand defaults to both platforms on mac and marks warnings distinctly', async () => {
   const output = new PassThrough();
   let printed = '';
   output.on('data', (chunk) => {
@@ -369,9 +369,11 @@ test('runDoctorCommand defaults to both platforms on mac and prints warnings sep
 
   assert.equal(result.success, true);
   assert.deepEqual(observedPlatforms, [PLATFORM_ANDROID, PLATFORM_IOS]);
-  assert.match(printed, /Ready/);
-  assert.match(printed, /Setup Required\n- None/);
-  assert.match(printed, /Warnings/);
+  // Doctor prints one ✓/✗/⚠ line per check — passing and warning checks are
+  // distinguished by their marker, not by grouped sections.
+  assert.match(printed, /✓ adb/);
+  assert.match(printed, /⚠ ffmpeg — Used to compress iOS recordings after capture\./);
+  assert.doesNotMatch(printed, /✗ /);
 });
 
 test('finalrun check reports an env ambiguity error instead of a parser error when --env is omitted', async () => {
@@ -956,8 +958,10 @@ test('finalrun start-server --help shows --workspace and top-level stop/status c
     assert.equal(startHelp.status, 0);
     assert.match(startHelp.stdout, /--workspace <path>/);
     assert.equal(stopHelp.status, 0);
-    assert.match(stopHelp.stdout, /stop the local finalrun report server/i);
-    assert.match(stopHelp.stdout, /--workspace <path>/);
+    // stop-server is workspace-independent: it stops every running server and
+    // clears stale state, so it takes no --workspace option.
+    assert.match(stopHelp.stdout, /stop all running finalrun report servers/i);
+    assert.doesNotMatch(stopHelp.stdout, /--workspace <path>/);
     assert.equal(statusHelp.status, 0);
     assert.match(statusHelp.stdout, /show the local finalrun report server status/i);
     assert.match(statusHelp.stdout, /--workspace <path>/);
@@ -1275,11 +1279,12 @@ test('finalrun start-server, server-status, and stop-server work from outside a 
     assert.match(statusResult.stdout, new RegExp(`URL: http://127\\.0\\.0\\.1:${port}`));
     assert.match(statusResult.stdout, /Healthy: yes/);
 
-    const stopResult = runCli(['stop-server', '--workspace', workspaceRoot], outsideDir, {
+    // stop-server is workspace-independent — it stops every running server.
+    const stopResult = runCli(['stop-server'], outsideDir, {
       FINALRUN_DISABLE_BROWSER: '1',
     });
     assert.equal(stopResult.status, 0);
-    assert.match(stopResult.stdout, /Stopped FinalRun report server/);
+    assert.match(stopResult.stdout, /Stopped \d+ FinalRun report server process\(es\)/);
     await assert.rejects(() => fsp.stat(path.join(workspace.artifactsDir, '.server.json')));
 
     const stoppedStatusResult = runCli(
@@ -1292,7 +1297,7 @@ test('finalrun start-server, server-status, and stop-server work from outside a 
     assert.equal(stoppedStatusResult.status, 0);
     assert.match(stoppedStatusResult.stdout, /is not running/);
   } finally {
-    runCli(['stop-server', '--workspace', workspaceRoot], outsideDir, {
+    runCli(['stop-server'], outsideDir, {
       FINALRUN_DISABLE_BROWSER: '1',
     });
     await fsp.rm(workspaceRoot, { recursive: true, force: true });
