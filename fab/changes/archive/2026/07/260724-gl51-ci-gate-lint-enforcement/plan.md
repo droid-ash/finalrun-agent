@@ -87,9 +87,14 @@ The two pre-existing `npm run lint` ERRORS on main (verified present with the un
 After the changes, the CI-equivalent command sequence MUST be verified locally: `npm install` succeeds; `npm run build --workspaces --if-present` builds every workspace this change touches; `npm run test:workspaces` runs green for every suite except failures that pre-date this change; and `npm run lint` exits 0 with the new rules surfacing as warnings. This change MUST NOT introduce any new build, test, or lint failure. (Discovered during verification, recorded in Notes: `main` itself is red under a fresh install — goal-executor's `tsc` fails on drifted `ai`/`@ai-sdk/*` types, and 6 cli tests fail from test-vs-implementation drift, reproduced identically on Node 20.19 and 24 and on the unmodified baseline. Repairing those is source-scope work excluded from this change; until those follow-ups land, the new gate is honestly red on them — which is the gate doing its job, not a defect of this change.)
 
 - **GIVEN** a clean checkout with the change applied
-- **WHEN** `npm install && npm run build --workspaces --if-present && npm run test:workspaces && npm run lint` runs
+- **WHEN** each step is run **independently** — `npm install`, then `npm run build --workspaces --if-present`, then `npm run test:workspaces`, then `npm run lint` (not `&&`-chained: while the pre-existing build breakage stood, chaining would short-circuit before the test and lint steps ever ran, so each was invoked separately)
 - **THEN** common (75), device-node (91), goal-executor (67) suites pass, cloud-core and report-web exit 0 via the tolerant runners, and lint exits 0 with warnings only
 - **AND** the only failing steps are the two pre-existing main breakages (goal-executor build; 6 cli tests), byte-identical with and without this change's diff
+
+> **Resolved before merge**: the two pre-existing `main` breakages described above did not remain
+> outstanding. They were fixed within this same change in commit `d2715e5` (the `@ai-sdk/anthropic`
+> provider-options type widening, and updating the 6 stale CLI tests to match deliberately-changed
+> behaviour). PR #151 merged with the full sequence green: build 0, 348/348 tests, lint 0 errors.
 
 ### Non-Goals
 

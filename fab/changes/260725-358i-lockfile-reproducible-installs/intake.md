@@ -11,7 +11,7 @@ break caused by unpinned dependency resolution. This change fixes the root cause
 
 **What happened in the previous change.** The new CI gate went red at the build step with:
 
-```
+```text
 src/ai/AIAgent.ts(575,9): error TS2322: Type 'AIAgentProviderOptions | undefined' is not
 assignable to type 'SharedV3ProviderOptions | undefined'.
 ```
