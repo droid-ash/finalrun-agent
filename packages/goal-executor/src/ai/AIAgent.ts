@@ -135,11 +135,29 @@ export interface GrounderResponse {
 
 type JsonRecord = Record<string, unknown>;
 type LLMPhase = 'planner' | 'grounder';
+/**
+ * Provider-specific options, keyed by provider id.
+ *
+ * Each value is validated against its real SDK option type via `satisfies` in
+ * `_getProviderOptions`, so option names and value types stay checked. The
+ * container is deliberately NOT typed as the SDK's `SharedV3ProviderOptions`
+ * (`Record<string, JSONObject>`): the provider option types are not themselves
+ * assignable to `JSONObject`, because some of their fields are declared with
+ * `unknown` — e.g. `@ai-sdk/anthropic`'s `fallbacks[].thinking` is
+ * `Record<string, unknown>`, and `unknown` is not a `JSONValue`. See the cast
+ * at the `generateText` call site.
+ */
 type AIAgentProviderOptions = {
   google?: GoogleLanguageModelOptions;
   openai?: OpenAILanguageModelResponsesOptions;
   anthropic?: AnthropicLanguageModelOptions;
 };
+
+/**
+ * The `providerOptions` parameter type accepted by `generateText`, derived from
+ * the function itself so we don't import from the transitive `@ai-sdk/provider`.
+ */
+type SdkProviderOptions = NonNullable<Parameters<typeof generateText>[0]>['providerOptions'];
 
 interface ResolvedFeatureConfig {
   provider: string;
@@ -572,7 +590,12 @@ export class AIAgent {
             ? Output.object({ schema: schemaForFeature(feature) })
             : Output.json(),
         maxOutputTokens: phase === 'planner' ? 8192 : 4096,
-        providerOptions,
+        // The SDK wants `Record<string, JSONObject>`, but its own provider
+        // option types aren't assignable to `JSONObject` (they carry `unknown`
+        // -typed fields — see AIAgentProviderOptions). Everything we build here
+        // is plain JSON, and each provider's options are `satisfies`-checked in
+        // `_getProviderOptions`, so widening at this one boundary is sound.
+        providerOptions: providerOptions as SdkProviderOptions,
       });
       output = result.output;
       text = result.text;

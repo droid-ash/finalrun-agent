@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm run clean && tsc",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "test": "node --test \"dist/**/*.test.js\""
+    "test": "node ./scripts/runTests.mjs"
   },
   "dependencies": {
     "@finalrun/common": "*",

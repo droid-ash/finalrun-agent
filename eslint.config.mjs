@@ -38,14 +38,17 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-wrapper-object-types': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-unsafe-function-type': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
       'no-case-declarations': 'off',
       'no-useless-assignment': 'off',
-      'prefer-const': 'off',
+      'prefer-const': 'warn',
       'preserve-caught-error': 'off',
     },
   },
@@ -60,20 +63,33 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      // Code-quality principles enforced as warnings (phase 1 — promotion to
+      // `error` is a follow-up once existing offenders are refactored):
+      // readability (fewer lines), max nesting depth <= 4, complexity as a
+      // DRY/YAGNI proxy.
+      'max-lines-per-function': [
+        'warn',
+        { max: 60, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      'max-depth': ['warn', 4],
+      complexity: ['warn', 12],
     },
   },
   {
     files: ['**/*.{ts,tsx,mts,cts,js,mjs,cjs}'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-wrapper-object-types': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-unsafe-function-type': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
       'no-case-declarations': 'off',
       'no-useless-assignment': 'off',
-      'prefer-const': 'off',
+      'prefer-const': 'warn',
       'preserve-caught-error': 'off',
     },
   },

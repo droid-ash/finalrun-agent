@@ -1,0 +1,47 @@
+name: CI
+
+# PR quality gate: build → test → lint on every pull request targeting main,
+# plus push to main as a post-merge safety net.
+#
+# The test step is the gate — a failing test fails the run. The lint step is
+# non-blocking in phase 1: the code-quality rules (max-lines-per-function,
+# max-depth, complexity, no-unused-vars, prefer-const) land at `warn`
+# severity, and eslint exits 0 on warnings-only output. Promotion to `error`
+# is a deliberate follow-up once existing offenders are refactored.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs: a new push to the same ref aborts the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19'
+          # No cache: 'npm' — this repo intentionally does not commit
+          # package-lock.json (.gitignore), so setup-node's npm cache
+          # feature has nothing to key on. (Mirrors release.yml.)
+
+      # Same reason `npm install` instead of `npm ci`: ci requires a lockfile.
+      - run: npm install
+
+      # Package test scripts run against compiled output (dist/), so the
+      # build must happen before tests.
+      - name: Build all workspaces
+        run: npm run build --workspaces --if-present
+
+      - name: Run tests (the PR gate)
+        run: npm run test:workspaces
+
+      - name: Lint (warnings are non-blocking in phase 1)
+        run: npm run lint
