@@ -10,7 +10,7 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 10
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-25T17:02:43Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T17:09:24Z"}
     hydrate: {started_at: "2026-07-25T17:09:24Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T17:12:28Z"}
     ship: {started_at: "2026-07-25T17:12:28Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-25T17:15:07Z"}
-    review-pr: {started_at: "2026-07-25T17:15:07Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-25T17:15:07Z", driver: git-pr, iterations: 1, completed_at: "2026-07-25T17:26:13Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/153
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: 'refactor: clear dead code and excess nesting flagged by the lint gate'
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-25T17:15:07Z
+last_updated: 2026-07-25T17:26:13Z
