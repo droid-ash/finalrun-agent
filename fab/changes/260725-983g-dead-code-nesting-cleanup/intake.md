@@ -142,8 +142,18 @@ Do **not** undertake a general decomposition of `runTests`, and do not chase its
 characterization tests first. A helper extracted purely to reduce depth is acceptable; a wholesale
 restructuring is not.
 
-**Behavior must be preserved exactly.** These are control-flow edits in live code paths (session
-running, test running, adb interaction). No functional change is intended or permitted.
+**Behavior must be preserved.** These are control-flow edits in live code paths (session running,
+test running, adb interaction). No functional change is intended or permitted on any normal
+execution path.
+
+**One qualified exception, on an error path.** Hoisting the post-result checks out of the per-test
+`try` in `testRunner.ts` changes where an exception thrown by `reportWriter.appendLogLine` (an
+`fs.appendFileSync`) is handled: previously the per-test `catch` caught it; now it propagates out of
+the loop. The outcomes converge — the original `catch`'s own first action is another
+`appendLogLine` to the same file, which rethrows the same error — so no observable difference is
+expected. The guarantee is therefore: **identical behavior on every normal path, and equivalent
+(not identical) handling of an `appendLogLine` write failure**, which MUST be verified to still
+rethrow and propagate rather than being silently swallowed.
 
 ### Out of scope
 
@@ -162,7 +172,7 @@ warning count changes, which memory does not record.
 
 ## Impact
 
-- **Modified (8 files)**: `packages/cli/src/hostPreflight.ts`, `packages/cli/src/testRunner.ts`,
+- **Modified (10 files)**: `packages/cli/src/hostPreflight.ts`, `packages/cli/src/testRunner.ts`,
   `packages/cli/src/sessionRunner.ts`, `packages/cli/src/reportServerManager.test.ts`,
   `packages/device-node/src/device/android/AndroidDevice.ts`,
   `packages/device-node/src/grpc/setup/AndroidDeviceSetup.ts`,

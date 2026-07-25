@@ -50,6 +50,7 @@ The blocks at `packages/cli/src/testRunner.ts:238`, `:320`, `:325` MUST be broug
 - **GIVEN** `:238` nests an abort/no-reportWriter check inside `if (runAborted)`, and `:320`/`:325` sit inside the per-test `try` block
 - **WHEN** `:238` is split into two sequential depth-4 guards, and the post-result abort/terminal-failure checks (`:320`/`:325`) are moved out of the per-test `try` to loop-body level (reachable only on the success path since the `catch` always breaks)
 - **THEN** loop-exit conditions, `runAborted` mutations, log lines, and report records are identical for every input ordering
+- **AND** the one qualified exception is the error path: an exception from `reportWriter.appendLogLine` (an `fs.appendFileSync`) now propagates out of the loop instead of being caught by the per-test `catch`. This MUST still rethrow and propagate rather than be silently swallowed; outcomes converge because the original `catch` itself began with another `appendLogLine` to the same file, which rethrew the same error
 
 #### R7: Flatten the depth-5 block in `AdbClient.ts:884`
 The block at `packages/device-node/src/infra/android/AdbClient.ts:884` (undeclared-permission classification inside the permission loop) MUST be brought to depth ≤ 4 using early `continue` guards, preserving behavior exactly.
@@ -62,7 +63,8 @@ The block at `packages/device-node/src/infra/android/AdbClient.ts:884` (undeclar
 
 - The 87 `max-lines-per-function` and 53 `complexity` warnings — deferred to the follow-up change that writes characterization tests first.
 - Promoting any lint rule from `warn` to `error`.
-- Test backfill, dependency changes, `docs/memory/**` edits (intake: no memory update needed).
+- Test backfill and dependency changes.
+- No memory content is *invalidated* by this change (intake: Affected Memory is None — verified at hydrate, which grepped every deleted symbol and found zero references in `docs/memory/**`). Hydrate did make one scoped addition to `docs/memory/ci/pr-quality-gate.md` — recording which lint rules are now clear tree-wide and must stay clear — which is hydrate's normal remit, not a source change.
 
 ### Design Decisions
 
