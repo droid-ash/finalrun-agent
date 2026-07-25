@@ -1,0 +1,9 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-25T15:03:42Z"}
+{"args":"Commit package-lock.json and switch CI/release to npm ci for reproducible installs; fixes root cause of semver-drift build breaks and repairs broken CONTRIBUTING npm ci guidance.","cmd":"fab-new","event":"command","ts":"2026-07-25T15:03:42Z"}
+{"delta":"+5.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-25T15:06:08Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-25T15:35:01Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-25T15:36:14Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-25T15:42:24Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-25T15:51:13Z"}
+{"event":"review","result":"passed","ts":"2026-07-25T15:51:13Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-25T15:55:19Z"}

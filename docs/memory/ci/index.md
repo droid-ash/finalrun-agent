@@ -1,5 +1,5 @@
 ---
-description: "PR quality gate (build → test → lint) and the explicit-discovery test-runner contract for the Node-20.19 floor"
+description: "PR quality gate (`npm ci` → build → test → lint), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
 ---
 # Ci Documentation
 
