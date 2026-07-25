@@ -309,7 +309,6 @@ export function formatStepTraceSummary(stepTrace: StepTrace): string {
 }
 
 const BLUE = '\x1b[34m';
-const MAGENTA = '\x1b[35m';
 const YELLOW = '\x1b[33m';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';

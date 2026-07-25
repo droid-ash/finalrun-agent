@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import type { ChildProcess } from 'child_process';
 import type { DeviceInventoryEntry } from '@finalrun/common';
 import { DeviceDiscoveryService } from './DeviceDiscoveryService.js';
 

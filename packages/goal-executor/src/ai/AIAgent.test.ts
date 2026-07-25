@@ -13,8 +13,6 @@ import {
 import { AIAgent, GrounderResponse, PlannerResponse } from './AIAgent.js';
 import { FatalProviderError } from './providerFailure.js';
 
-type LLMPhase = 'planner' | 'grounder';
-
 function makeAgent(overrides?: {
   defaults?: Partial<ModelDefaults>;
   features?: FeatureOverrides;

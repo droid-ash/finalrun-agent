@@ -7,7 +7,6 @@ import {
   type FeatureOverrides,
   type LogEntry,
   type ModelDefaults,
-  type RunTarget,
   type RuntimeBindings,
   type TestResult,
 } from '@finalrun/common';
@@ -24,11 +23,10 @@ import {
 } from '@finalrun/common';
 import { formatDiagnosticsForOutput } from './deviceInventoryPresenter.js';
 import { compileTestObjective } from './testCompiler.js';
-import type { ExecutionStatus } from '@finalrun/goal-executor';
+import type { ExecutionStatus, TestExecutionResult } from '@finalrun/goal-executor';
 import { runCheck, type CheckRunnerOptions, type CheckRunnerResult } from '@finalrun/common';
 import { ReportWriter } from './reportWriter.js';
 import { rebuildRunIndex } from './runIndex.js';
-import type { LoadedEnvironmentConfig } from '@finalrun/common';
 import {
   formatHostPreflightReport,
   resolveTestRequestedPlatforms,
@@ -234,14 +232,14 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
 
     try {
       for (const test of checked.tests) {
+        if (runAborted && !reportWriter) {
+          throw new PreExecutionFailureError({
+            phase: 'setup',
+            message: 'Run aborted before execution.',
+            exitCode: 130,
+          });
+        }
         if (runAborted) {
-          if (!reportWriter) {
-            throw new PreExecutionFailureError({
-              phase: 'setup',
-              message: 'Run aborted before execution.',
-              exitCode: 130,
-            });
-          }
           break;
         }
 
@@ -277,6 +275,7 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
         reportWriter.appendLogLine(`Running test ${test.relativePath}`);
         const testStartedAt = new Date().toISOString();
 
+        let goalResult: TestExecutionResult;
         try {
           const goal =
             effectiveGoals.get(test.testId!) ??
@@ -288,7 +287,7 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
             test.testId!,
             `recording${recordingExtension}`,
           );
-          const goalResult = await testRunnerDependencies.executeTestOnSession(goalSession, {
+          goalResult = await testRunnerDependencies.executeTestOnSession(goalSession, {
             goal,
             apiKeys: options.apiKeys,
             defaults: options.defaults,
@@ -317,17 +316,6 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
           );
           testResults.push(testRecord);
           encounteredFailure ||= !goalResult.success;
-          if (goalResult.status === 'aborted' || runAborted) {
-            runAborted = true;
-            reportWriter.appendLogLine(`Run aborted while executing test ${test.relativePath}.`);
-            break;
-          }
-          if (goalResult.terminalFailure) {
-            reportWriter.appendLogLine(
-              `Stopping run after terminal AI provider failure in ${test.relativePath}: ${goalResult.terminalFailure.message}`,
-            );
-            break;
-          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           encounteredFailure = true;
@@ -343,6 +331,18 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
               startedAt: testStartedAt,
               completedAt: new Date().toISOString(),
             }),
+          );
+          break;
+        }
+
+        if (goalResult.status === 'aborted' || runAborted) {
+          runAborted = true;
+          reportWriter.appendLogLine(`Run aborted while executing test ${test.relativePath}.`);
+          break;
+        }
+        if (goalResult.terminalFailure) {
+          reportWriter.appendLogLine(
+            `Stopping run after terminal AI provider failure in ${test.relativePath}: ${goalResult.terminalFailure.message}`,
           );
           break;
         }
