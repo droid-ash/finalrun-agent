@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion."
+description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion."
 ---
 # PR Quality Gate (ci)
 
@@ -13,15 +13,20 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 ## Requirements
 
 ### Requirement: PR CI gate stages
-`.github/workflows/ci.yml` MUST run, in order, `npm install` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (package `test` scripts run against compiled `dist/` output). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
+`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (package `test` scripts run against compiled `dist/` output). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
 
 #### Scenario: PR with only lint warnings stays green
 - **GIVEN** a PR whose code violates only the `warn`-severity code-quality rules
 - **WHEN** the CI workflow runs
 - **THEN** `npm run lint` exits 0 and the run passes; only a failing test fails the run
 
-### Requirement: No committed lockfile — install, never `npm ci`
-`package-lock.json` is gitignored, so CI MUST use `npm install` (never `npm ci`, which requires a lockfile) and setup-node MUST NOT enable `cache: 'npm'` (nothing to key on). This mirrors `release.yml`.
+### Requirement: Committed lockfile — reproducible `npm ci` installs
+`package-lock.json` is committed at the repo root (one lockfile covers every workspace; `lockfileVersion` 3, installable by the npm 10 bundled with the pinned Node 20.19). Both `.github/workflows/ci.yml` and `release.yml` MUST install with `npm ci` (never `npm install`, which re-resolves caret ranges afresh and makes red/green depend on registry state), and their setup-node steps MUST enable `cache: 'npm'` (keyed on the lockfile). Dependency changes MUST land the updated lockfile in the same commit — `npm ci` fails loudly when `package.json` and the lockfile disagree.
+
+#### Scenario: upstream in-range release cannot break CI
+- **GIVEN** an upstream dependency publishes a new version inside an existing caret range
+- **WHEN** CI runs on an unchanged commit
+- **THEN** `npm ci` installs the exact locked tree and the run's outcome is unchanged
 
 ### Requirement: Code-quality principles encoded as ESLint warnings
 `eslint.config.mjs` encodes four code-quality principles at `warn` severity on the TS/TSX source block (`**/*.{ts,tsx,mts,cts}`): `max-lines-per-function` (`{ max: 60, skipBlankLines: true, skipComments: true, IIFEs: true }`), `max-depth` (`4`), `complexity` (`12`), plus re-enabled `@typescript-eslint/no-unused-vars` (`^_`-prefix ignore) and `prefer-const`. `@typescript-eslint/no-explicit-any` stays `off`. Severity is `warn` (not `error`) so the gate lands without breaking the pre-existing oversized functions; violations are visible in `npm run lint` output.
