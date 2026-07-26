@@ -381,11 +381,15 @@ test('submitRun removes the temp app zip when spec zipping fails before the uplo
   const missingSpec = path.join(makeTempDir('specs'), 'gone.yaml');
   const stub = installFetchStub(() => okResponse());
   try {
+    // Matched, not bare: an unmatched assert.rejects would also pass if cleanup
+    // replaced the missing-spec error with its own, which is exactly the
+    // error-propagation contract this test is meant to protect.
     await assert.rejects(
       submitRun(makeInput({
         appPath: bundlePath,
         checked: { tests: [{ sourcePath: missingSpec, relativePath: 'gone.yaml', name: 'Gone' }] },
       })),
+      /ADM-ZIP: File not found/,
     );
   } finally {
     stub.restore();
