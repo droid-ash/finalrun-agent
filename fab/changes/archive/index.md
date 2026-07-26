@@ -1,5 +1,6 @@
 # Archive Index
 
+- **260726-pvf3-characterize-refactor-cloud-submit** — Characterize and Refactor `cloud-core` — First Tests for a Zero-Coverage Package
 - **260726-gohy-fix-runtests-session-cleanup-leak** — Fix the Session and Log-Sink Cleanup Leaks in `runTests`
 - **260726-vzi3-split-testexecutor-runtests** — Split the Two Largest Well-Tested Functions
 - **260725-983g-dead-code-nesting-cleanup** — Clear Dead Code and Excess Nesting Flagged by the Lint Gate

@@ -1,0 +1,53 @@
+id: rpx7
+name: 260726-rpx7-fix-submit-appzip-cleanup-leak
+created: 2026-07-26T14:18:46Z
+created_by: droid-ash
+change_type: fix
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: done
+    review-pr: done
+plan:
+    generated: true
+    task_count: 6
+    acceptance_count: 10
+    acceptance_completed: 10
+confidence:
+    certain: 9
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 5.0
+    fuzzy: true
+    dimensions:
+        signal: 85.0
+        reversibility: 83.5
+        competence: 89.5
+        disambiguation: 87.5
+stage_metrics:
+    intake: {started_at: "2026-07-26T14:18:46Z", driver: fab-new, iterations: 1, completed_at: "2026-07-26T14:32:59Z"}
+    apply: {started_at: "2026-07-26T14:32:59Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:40:00Z"}
+    review: {started_at: "2026-07-26T14:40:00Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:52:36Z"}
+    hydrate: {started_at: "2026-07-26T14:52:36Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:58:02Z"}
+    ship: {started_at: "2026-07-26T14:58:02Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T15:01:24Z"}
+    review-pr: {started_at: "2026-07-26T15:01:24Z", driver: git-pr, iterations: 1, completed_at: "2026-07-26T15:13:28Z"}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/157
+change_type_source: explicit
+true_impact:
+    added: 475
+    deleted: 34
+    net: 441
+    tests:
+        added: 26
+        deleted: 0
+        net: 26
+    computed_at: "2026-07-26T15:01:24Z"
+    computed_at_stage: ship
+summary: Scope each temp-file finally to its own acquisition in cloud-core submitRun so a pre-upload throw cannot orphan the temp .app.zip
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-26T15:13:28Z

@@ -241,7 +241,12 @@ cache; (c) a child-process probe — slower and format-coupled via `__dirname` a
   (restored in `finally`), uses real `fs.mkdtempSync` workspaces, and passed GREEN against the
   unmodified `submit.ts` before any refactor commit touched it
   *(review-verified: `submit.ts` reverted to `origin/main` with the test file kept → rebuild →
-  14/14 pass, exit 0)*
+  14/14 pass, exit 0. Precise scope of that run: the suite was 14 tests when the baseline was
+  taken. The 15th — the `console.log` server-default notice pin — was added later in the same PR,
+  during the review response, so it was never itself run against the unmodified `submit.ts`. It is
+  a characterization test over a string that predates the refactor and is byte-identical across it,
+  so it would pass on both sides; that was reasoned, not measured, and is recorded as such rather
+  than restated as a 15-test baseline that never ran.)*
 - [x] A-002 R7: `submitRun` is a thin orchestrator over module-private phase helpers with a
   per-call local context object and an unchanged `try`/`finally` cleanup scope
 - [x] A-003 R8: cloud-core's `test` script is `node ../../scripts/run-node-tests.mjs` and
