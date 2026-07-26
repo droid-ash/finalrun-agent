@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion."
+description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are cleared by extracting phases behind a phase-outcome union with per-call local state."
 ---
 # PR Quality Gate (ci)
 
@@ -80,3 +80,15 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 **Why**: The gate must be green *and honest* — green for a package that legitimately has no tests yet, red for a package whose real tests failed or failed to compile. A single policy cannot express both; the exit-code inversion is the distinguishing signal. One shared strict copy avoids duplicating the script into three packages.
 **Rejected**: (a) a blanket `|| true` — swallows genuine test failures too; (b) copying the runner into each package — 3× duplication of a ~70-line script in a change that exists to enforce DRY.
 *Introduced by*: 260724-gl51-ci-gate-lint-enforcement
+
+### Phase helpers return a phase-outcome union; the loop stays in the orchestrator
+**Decision**: Clearing a `max-lines-per-function`/`complexity` warning on a long function means extracting each phase into a named helper that returns a discriminated `PhaseOutcome` union — `proceed` carrying the phase's value, `continue`, or `return` carrying the final result — while the loop and every `continue`/`return` decision stay in the orchestrating function, which then reads as its phase sequence. `TestExecutor.executeGoal` (`_`-prefixed private methods) and `testRunner.runTests` (module-private functions) are the worked examples.
+**Why**: All control flow stays visible at one level, so the reader never has to open a helper to learn whether it can end the run, and the union narrows in TypeScript without casts. The split only counts when every extracted helper itself lands under the ceilings (≤60 lines, complexity ≤12) — a coarse split relocates warnings instead of clearing them, and can raise the total.
+**Rejected**: (a) sentinel exceptions thrown from phase helpers — hides loop control and collides with the genuine error paths those functions already catch (a planner error is a caught condition, not control flow); (b) boolean out-parameters or flags — each one re-adds a branch to the caller, moving complexity rather than reducing it.
+*Introduced by*: 260726-vzi3-split-testexecutor-runtests
+
+### Accumulating state lives on a per-call local context object, never on instance fields
+**Decision**: State that accumulates across a split function's phases lives on a plain context object constructed as a local at the top of the call and passed to the helpers — `GoalRunState` (history, remember, consecutive transient capture failures) in `executeGoal`, `TestRunContext` (test results, failure flag, lazily created report writer, run dir, abort state, log sinks) in `runTests`. Fields that never change are `readonly`.
+**Why**: The object's lifetime is identical to the locals it replaces, which is what makes the split behavior-preserving; mutation sites stay explicit and greppable through the `ctx.`/`run.` prefix.
+**Rejected**: (a) promoting the locals to instance fields — changes their lifetime so state survives across calls on the same instance, a real behavior change that a passing test suite does not rule out; (b) threading the values as parameter/return tuples through every helper — unreadable past about three pieces of state, and every added phase perturbs every signature.
+*Introduced by*: 260726-vzi3-split-testexecutor-runtests

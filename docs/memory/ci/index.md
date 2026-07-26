@@ -7,4 +7,4 @@ description: "PR quality gate (`npm ci` → build → test → lint), the commit
 
 | File | Description |
 |------|-------------|
-| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion. |
+| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are cleared by extracting phases behind a phase-outcome union with per-call local state. |
