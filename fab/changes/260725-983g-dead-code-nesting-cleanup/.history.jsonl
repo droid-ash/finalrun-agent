@@ -1,0 +1,12 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-25T16:38:54Z"}
+{"args":"Clear the 10 no-unused-vars (dead code, YAGNI) and 6 max-depth violations surfaced by the new lint rules; low-risk first pass of the code-quality refactor.","cmd":"fab-new","event":"command","ts":"2026-07-25T16:38:54Z"}
+{"delta":"+4.8","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-25T16:40:52Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-25T16:50:12Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-25T16:51:09Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-25T17:02:43Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-25T17:09:24Z"}
+{"event":"review","result":"passed","ts":"2026-07-25T17:09:24Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-25T17:12:28Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-25T17:15:07Z"}
+{"cmd":"git-pr-review","event":"command","ts":"2026-07-25T17:18:01Z"}
+{"event":"review","result":"passed","ts":"2026-07-25T17:26:13Z"}

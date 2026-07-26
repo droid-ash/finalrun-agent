@@ -113,7 +113,6 @@ export class AndroidDeviceSetup {
     let testRunnerInstalled = false;
     let localPort: number | null = null;
     let driverProcess: AndroidDriverProcessHandle | null = null;
-    let startupState: AndroidDriverStartupState | null = null;
 
     try {
       const driverPath = await this._filePathUtil.getDriverAppPath();
@@ -165,7 +164,6 @@ export class AndroidDeviceSetup {
         grpcClient,
       );
       driverProcess = spawned.driverProcess;
-      startupState = spawned.startupState;
 
       try {
         await this._awaitCaptureReadiness(spawned.startupState, grpcClient);
@@ -182,7 +180,6 @@ export class AndroidDeviceSetup {
           spawned.driverProcess,
         );
         driverProcess = null;
-        startupState = null;
         if (!priorProcessGone) {
           // The prior instrumentation host is still alive after the cleanup
           // cap, so its UiAutomation binding is likely still held. Starting a
@@ -199,7 +196,6 @@ export class AndroidDeviceSetup {
           grpcClient,
         );
         driverProcess = spawned.driverProcess;
-        startupState = spawned.startupState;
 
         await this._awaitCaptureReadiness(spawned.startupState, grpcClient);
       }

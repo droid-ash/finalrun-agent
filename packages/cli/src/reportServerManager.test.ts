@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { ChildProcess, SpawnSyncReturns } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import type { ReportServerState } from '@finalrun/common';
 import {
   buildRunReportUrl,
@@ -64,17 +64,6 @@ function createSpawnedChild(pid: number): ChildProcess {
     pid,
     unref() {},
   } as ChildProcess;
-}
-
-function createSuccessfulCommandResult(): SpawnSyncReturns<string> {
-  return {
-    status: 0,
-    pid: 7331,
-    output: ['', '', ''],
-    stdout: '',
-    stderr: '',
-    signal: null,
-  };
 }
 
 async function findAvailablePort(): Promise<number> {

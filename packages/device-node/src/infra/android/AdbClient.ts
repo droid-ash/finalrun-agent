@@ -849,9 +849,8 @@ export class AdbClient {
       }
 
       for (const androidPermission of translatedPermissions) {
-        let result: AndroidCommandResult;
         if (androidPermission === 'SYSTEM_ALERT_WINDOW') {
-          result = await this._toggleSystemAlertWindowPermission(
+          const result = await this._toggleSystemAlertWindowPermission(
             adbPath,
             deviceSerial,
             packageName,
@@ -862,35 +861,37 @@ export class AdbClient {
               `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
             );
           }
-        } else {
-          const adbAction = action === 'allow' ? 'grant' : 'revoke';
-          const failurePrefix = `Failed to ${adbAction} ${androidPermission} on ${deviceSerial}`;
-          result = await this._runAdb(
-            adbPath,
-            [
-              '-s',
-              deviceSerial,
-              'shell',
-              'pm',
-              adbAction,
-              packageName,
-              androidPermission,
-            ],
-            failurePrefix,
-            { suppressErrorLog: true },
-          );
-          if (!result.success) {
-            const textForMatch = `${result.stderr ?? ''}\n${result.message ?? ''}`;
-            if (isUndeclaredPermissionGrantFailure(textForMatch)) {
-              skippedUndeclaredRuntime += 1;
-            } else {
-              Logger.e(failurePrefix, new Error(result.message ?? 'unknown error'));
-              errors.push(
-                `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
-              );
-            }
-          }
+          continue;
         }
+
+        const adbAction = action === 'allow' ? 'grant' : 'revoke';
+        const failurePrefix = `Failed to ${adbAction} ${androidPermission} on ${deviceSerial}`;
+        const result = await this._runAdb(
+          adbPath,
+          [
+            '-s',
+            deviceSerial,
+            'shell',
+            'pm',
+            adbAction,
+            packageName,
+            androidPermission,
+          ],
+          failurePrefix,
+          { suppressErrorLog: true },
+        );
+        if (result.success) {
+          continue;
+        }
+        const textForMatch = `${result.stderr ?? ''}\n${result.message ?? ''}`;
+        if (isUndeclaredPermissionGrantFailure(textForMatch)) {
+          skippedUndeclaredRuntime += 1;
+          continue;
+        }
+        Logger.e(failurePrefix, new Error(result.message ?? 'unknown error'));
+        errors.push(
+          `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
+        );
       }
     }
 

@@ -473,45 +473,8 @@ export async function executeTestOnSession(
     let deviceLog: DeviceLogCaptureResult | undefined;
     if (activeLogCapture) {
       try {
-        const stopLogResponse = await session.device.stopLogCapture(
-          activeLogCapture.runId,
-          activeLogCapture.testId,
-        );
-        if (stopLogResponse.success) {
-          const filePath = stopLogResponse.data?.['filePath'];
-          if (typeof filePath === 'string') {
-            deviceLog = {
-              filePath,
-              startedAt:
-                typeof stopLogResponse.data?.['startedAt'] === 'string'
-                  ? (stopLogResponse.data['startedAt'] as string)
-                  : activeLogCapture.startedAt,
-              completedAt:
-                typeof stopLogResponse.data?.['completedAt'] === 'string'
-                  ? (stopLogResponse.data['completedAt'] as string)
-                  : new Date().toISOString(),
-            };
-          } else {
-            Logger.w(
-              `Log capture stopped for test ${activeLogCapture.testId} but no file path was returned.`,
-            );
-          }
-          activeLogCapture = undefined;
-        } else {
-          Logger.w(
-            `Unable to stop log capture for test ${activeLogCapture.testId}: ` +
-            `${stopLogResponse.message ?? 'unknown log capture error'}`,
-          );
-          try {
-            await session.device.abortLogCapture(
-              activeLogCapture.runId,
-              activeLogCapture.keepPartialOnFailure,
-            );
-          } catch (error) {
-            Logger.w('Failed to finalize log capture after stop failure:', error);
-          }
-          activeLogCapture = undefined;
-        }
+        deviceLog = await stopActiveLogCapture(session.device, activeLogCapture);
+        activeLogCapture = undefined;
       } catch (error) {
         Logger.w('Failed to stop device log capture:', error);
         // Do NOT clear activeLogCapture here — let the finally block abort it
@@ -553,6 +516,57 @@ export async function executeTestOnSession(
     }
     renderer.destroy();
   }
+}
+
+/**
+ * Stops an active device log capture and builds its result record.
+ *
+ * On stop failure the capture is aborted (best-effort) and `undefined` is
+ * returned. Errors thrown by `stopLogCapture` propagate to the caller, which
+ * leaves the capture active so the enclosing `finally` block can abort it.
+ */
+async function stopActiveLogCapture(
+  device: TestSession['device'],
+  capture: {
+    runId: string;
+    testId: string;
+    startedAt: string;
+    keepPartialOnFailure: boolean;
+  },
+): Promise<DeviceLogCaptureResult | undefined> {
+  const stopLogResponse = await device.stopLogCapture(capture.runId, capture.testId);
+  if (!stopLogResponse.success) {
+    Logger.w(
+      `Unable to stop log capture for test ${capture.testId}: ` +
+      `${stopLogResponse.message ?? 'unknown log capture error'}`,
+    );
+    try {
+      await device.abortLogCapture(capture.runId, capture.keepPartialOnFailure);
+    } catch (error) {
+      Logger.w('Failed to finalize log capture after stop failure:', error);
+    }
+    return undefined;
+  }
+
+  const filePath = stopLogResponse.data?.['filePath'];
+  if (typeof filePath !== 'string') {
+    Logger.w(
+      `Log capture stopped for test ${capture.testId} but no file path was returned.`,
+    );
+    return undefined;
+  }
+
+  return {
+    filePath,
+    startedAt:
+      typeof stopLogResponse.data?.['startedAt'] === 'string'
+        ? (stopLogResponse.data['startedAt'] as string)
+        : capture.startedAt,
+    completedAt:
+      typeof stopLogResponse.data?.['completedAt'] === 'string'
+        ? (stopLogResponse.data['completedAt'] as string)
+        : new Date().toISOString(),
+  };
 }
 
 /**

@@ -99,7 +99,7 @@ export class AndroidDevice implements DeviceRuntime {
     return this._toResponse(await this._adbClient.home(this._adbPath, this._deviceSerial));
   }
 
-  async rotate(action: RotateAction): Promise<DeviceNodeResponse> {
+  async rotate(_action: RotateAction): Promise<DeviceNodeResponse> {
     return this._toResponse(
       await this._adbClient.rotate(this._adbPath, this._deviceSerial),
     );

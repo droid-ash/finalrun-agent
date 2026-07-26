@@ -7,11 +7,6 @@ import { AndroidRecordingProvider, CliFilePathUtil, IOSRecordingProvider } from 
 
 const execFileAsync = promisify(execFile);
 
-type ExecFileFn = (
-  file: string,
-  args: readonly string[],
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
-
 export type HostPreflightRequestedPlatform =
   | typeof PLATFORM_ANDROID
   | typeof PLATFORM_IOS
@@ -215,19 +210,6 @@ function formatTestReport(result: HostPreflightResult): string {
       : "Run 'finalrun doctor' for a full readiness check.";
   lines.push('');
   lines.push(doctorHint);
-  return lines.join('\n');
-}
-
-function formatSection(title: string, checks: HostPreflightCheck[]): string {
-  const lines = [title];
-  if (checks.length === 0) {
-    lines.push('- None');
-    return lines.join('\n');
-  }
-
-  for (const check of checks) {
-    lines.push(...formatCheckLines(check));
-  }
   return lines.join('\n');
 }
 

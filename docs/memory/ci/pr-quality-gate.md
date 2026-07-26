@@ -29,7 +29,9 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 - **THEN** `npm ci` installs the exact locked tree and the run's outcome is unchanged
 
 ### Requirement: Code-quality principles encoded as ESLint warnings
-`eslint.config.mjs` encodes four code-quality principles at `warn` severity on the TS/TSX source block (`**/*.{ts,tsx,mts,cts}`): `max-lines-per-function` (`{ max: 60, skipBlankLines: true, skipComments: true, IIFEs: true }`), `max-depth` (`4`), `complexity` (`12`), plus re-enabled `@typescript-eslint/no-unused-vars` (`^_`-prefix ignore) and `prefer-const`. `@typescript-eslint/no-explicit-any` stays `off`. Severity is `warn` (not `error`) so the gate lands without breaking the pre-existing oversized functions; violations are visible in `npm run lint` output.
+`eslint.config.mjs` encodes the four code-quality principles (readability, DRY, YAGNI, function size/nesting) as **five** rules at `warn` severity on the TS/TSX source block (`**/*.{ts,tsx,mts,cts}`): `max-lines-per-function` (`{ max: 60, skipBlankLines: true, skipComments: true, IIFEs: true }`), `max-depth` (`4`), `complexity` (`12`), plus re-enabled `@typescript-eslint/no-unused-vars` (`^_`-prefix ignore) and `prefer-const`. `@typescript-eslint/no-explicit-any` stays `off`. Severity is `warn` (not `error`) so the gate lands without breaking the pre-existing oversized functions; violations are visible in `npm run lint` output.
+
+`@typescript-eslint/no-unused-vars`, `max-depth`, and `prefer-const` are clear tree-wide and MUST stay clear — a new violation of any of the three is a regression introduced by the PR, not inherited debt. The remaining warnings are all `max-lines-per-function` and `complexity`, concentrated in the pre-existing oversized functions; those two rules are what still blocks promoting the set from `warn` to `error`.
 
 ### Requirement: Tests run through explicit-discovery runner scripts
 Every workspace `test` script MUST discover test files by explicit recursive walk (never a `node --test`/`tsx --test` glob), because the pinned Node 20.19 does not expand globs and a directory positional (`node --test dist/`) silently resolves to one bogus passing entry on Node ≥21. Two runner shapes exist:
@@ -63,7 +65,7 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 
 ### Lint rules land as warnings, not errors
 **Decision**: The four code-quality rules land at `warn` severity, not `error`.
-**Why**: A hard gate would break the pre-existing oversized/deeply-nested functions on day one. `warn` makes violations visible in CI output without failing the build, so the foundation lands non-breaking; promotion to `error` is a deliberate follow-up once offenders are refactored.
+**Why**: A hard gate would break the pre-existing oversized/deeply-nested functions on day one. `warn` makes violations visible in CI output without failing the build, so the foundation lands non-breaking; promotion to `error` is a deliberate follow-up, gated on clearing the remaining `max-lines-per-function`/`complexity` offenders.
 **Rejected**: `error` severity — would fail every PR against the existing offenders before any refactor could land.
 *Introduced by*: 260724-gl51-ci-gate-lint-enforcement
 
