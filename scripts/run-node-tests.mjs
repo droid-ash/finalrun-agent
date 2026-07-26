@@ -13,11 +13,11 @@
 //
 // Explicit find-then-run (the packages/cli/scripts/runTests.mjs pattern) is
 // deterministic on every supported Node version. This shared copy keeps the
-// three consuming packages (common, device-node, goal-executor) from each
-// duplicating the script. Semantics are STRICT: these packages have real
+// consuming packages (common, cloud-core, device-node, goal-executor) from
+// each duplicating the script. Semantics are STRICT: these packages have real
 // tests, so finding zero test files is a build/packaging problem — exit 1,
 // never a silent pass. (Packages with no tests yet use their own tolerant
-// runner instead: packages/{cloud-core,report-web}/scripts/runTests.mjs.)
+// runner instead: packages/report-web/scripts/runTests.mjs.)
 
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
