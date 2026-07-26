@@ -70,7 +70,9 @@ Local state accumulated across iterations that MUST keep exactly its current sem
   grounder LLM calls per step
 
 **The central design risk is state threading.** Each extracted helper must either receive and return
-the state it mutates, or operate on an explicit per-iteration context object. Converting an
+the state it mutates, or operate on an explicit per-run (per-call) context object — `history`,
+`remember`, and `consecutiveTransientCaptureFailures` persist across the whole invocation, not a
+single iteration, so the context's lifetime is the call, not the loop body. Converting an
 accumulating local into a field on the class, or into a shared mutable object with different
 lifetime, would be a behavior change even if tests pass. Prefer explicit parameters and return
 values over new instance fields.
@@ -159,7 +161,7 @@ this one restructures the internals of two documented subsystems.
 | 2 | Certain | The three untested giants are excluded | `sessionRunner`/`submit`/`reportWriter` have zero tests; refactoring them without characterization tests would be unsafe | S:90 R:80 A:95 D:95 |
 | 3 | Confident | `executeGoal` phases become private methods on `TestExecutor`; the iteration loop stays in `executeGoal` | Matches the file's existing `_`-prefixed private-method convention; keeping the loop in place makes the top level read as its phase sequence | S:70 R:75 A:85 D:70 |
 | 4 | Certain | Every extracted helper must itself be ≤60 lines and complexity ≤12, and the net warning count MUST fall | Otherwise the refactor relocates warnings rather than clearing them, defeating the purpose | S:90 R:85 A:95 D:90 |
-| 5 | Certain | Accumulating state must be threaded explicitly (params/returns or a per-iteration context), NOT promoted to new instance fields | Changing a local's lifetime to a field is a real behavior change that tests may not catch | S:85 R:65 A:90 D:85 |
+| 5 | Certain | Accumulating state must be threaded explicitly (params/returns or a per-run/per-call context), NOT promoted to new instance fields | Changing a local's lifetime to a field is a real behavior change that tests may not catch; the context's lifetime is the invocation, since the accumulators outlive any single iteration | S:85 R:65 A:90 D:85 |
 | 6 | Confident | No test file should need modification; if one does, treat it as evidence of behavior change | The refactor is behavior-preserving, so existing assertions must hold unchanged; a required test edit is a red flag, not a chore | S:80 R:70 A:85 D:80 |
 | 7 | Certain | The previous change's `max-depth` fixes in `runTests` — including the hoist and its documented exception-path qualification — must be preserved, not reverted | They are deliberate, reviewed, and shipped in PR #153; silently undoing them would reintroduce cleared warnings and lose a recorded caveat | S:90 R:80 A:90 D:90 |
 | 8 | Confident | The two optional `TestExecutor` items are fixed only if trivial | `_captureDeviceState` is 2 lines over; taking it opportunistically is cheap, but it must not expand the change | S:70 R:90 A:85 D:75 |

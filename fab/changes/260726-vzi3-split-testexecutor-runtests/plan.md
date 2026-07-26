@@ -138,6 +138,31 @@ The two methods share an identical head (stabilized screenshot+hierarchy request
 - Check items as you review: `- [x]`
 - All acceptance items must pass before `/fab-continue` (hydrate)
 
+### Deferred: pre-existing session-cleanup leak in `runTests` (follow-up bug fix)
+
+CodeRabbit flagged (PR #154) that in `runTests`, `prepareRunSession` can return a live
+`goalSession` and the immediately-following `if (ctx.runAborted) throw abortedBeforeExecutionError()`
+throws **before** the inner `try` whose `finally` calls `cleanupRunResources`. On that path the
+session is created and never cleaned up. The same applies to
+`Logger.removeSink(ctx.bufferingSink)`, which lives in the inner `finally`.
+
+**This is a real latent bug, but it is NOT introduced by this change** — it is structurally
+identical to `origin/main`: there, `goalSession` is assigned at `testRunner.ts:203`, the abort check
+throws at `:225`, and the try whose `finally` (`:379`) performs `goalSession.cleanup()` (`:382`) and
+`Logger.removeSink(bufferingSink)` (`:390`) only opens at `:233`. The refactor preserved the window
+exactly, as the review stage independently confirmed ("a preserved pre-existing quirk").
+
+**Deferred deliberately.** This change's contract is zero behavior change; closing the leak alters
+cleanup semantics on an error path and would break the equivalence property that makes this diff
+reviewable. It belongs in its own `fix:` change, which should:
+
+1. Open the `try` **before** the post-`prepareRunSession` abort check so any returned session is
+   always released.
+2. Move `Logger.removeSink(ctx.bufferingSink)` to the outer `finally` beside `removeSigintListener`.
+3. Reduce `cleanupRunResources` to releasing session resources only.
+4. Add a regression test for abort-after-session-prepare — the path has no coverage today, which is
+   why the leak survived.
+
 ## Deletion Candidates
 
 - `packages/goal-executor/src/TestExecutor.ts:1013` `_isTransientCaptureFailure` — now has exactly one caller (`_classifyCaptureFailure`, its only remaining consumer after T003); the two could be merged into one predicate-plus-builder if a future change wants the extra symbol gone.
