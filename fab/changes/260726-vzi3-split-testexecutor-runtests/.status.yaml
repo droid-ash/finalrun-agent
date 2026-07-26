@@ -1,0 +1,53 @@
+id: vzi3
+name: 260726-vzi3-split-testexecutor-runtests
+created: 2026-07-26T01:42:07Z
+created_by: ashish-noon
+change_type: refactor
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: done
+    review-pr: active
+plan:
+    generated: true
+    task_count: 4
+    acceptance_count: 13
+    acceptance_completed: 13
+confidence:
+    certain: 7
+    confident: 3
+    tentative: 0
+    unresolved: 0
+    score: 4.9
+    fuzzy: true
+    dimensions:
+        signal: 83.0
+        reversibility: 79.5
+        competence: 89.0
+        disambiguation: 85.0
+stage_metrics:
+    intake: {started_at: "2026-07-26T01:42:07Z", driver: fab-new, iterations: 1, completed_at: "2026-07-26T01:49:24Z"}
+    apply: {started_at: "2026-07-26T01:49:24Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T02:10:40Z"}
+    review: {started_at: "2026-07-26T02:10:40Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T02:18:50Z"}
+    hydrate: {started_at: "2026-07-26T02:18:50Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T02:22:50Z"}
+    ship: {started_at: "2026-07-26T02:22:50Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T02:25:42Z"}
+    review-pr: {started_at: "2026-07-26T02:25:42Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/154
+change_type_source: explicit
+true_impact:
+    added: 1351
+    deleted: 726
+    net: 625
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-26T02:25:42Z"
+    computed_at_stage: ship
+summary: Split executeGoal and runTests into phase helpers with per-call local state objects; recorded the decomposition convention in ci memory
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-26T02:25:42Z

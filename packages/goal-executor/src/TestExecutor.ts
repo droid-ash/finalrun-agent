@@ -19,11 +19,12 @@ import {
   type TerminalFailureSignal,
   terminalFailureFromError,
 } from './ai/providerFailure.js';
-import { ActionExecutor } from './ActionExecutor.js';
+import { ActionExecutor, type ActionOutput } from './ActionExecutor.js';
 import {
   StepTraceBuilder,
   formatStepTraceSummary,
   startTracePhase,
+  type ActiveTracePhase,
   type SpanTiming,
   type StepTrace,
   type TimingMetadata,
@@ -175,6 +176,40 @@ type DeviceStateCaptureResult =
       captureTrace?: CaptureTraceMetadata;
     };
 
+/**
+ * Mutable state accumulated across iterations of one `executeGoal` run.
+ * Created as a local per invocation and threaded explicitly through the
+ * phase methods — never stored on the executor instance.
+ */
+interface GoalRunState {
+  readonly startedAt: string;
+  readonly maxIterations: number;
+  history: string;
+  remember: string[];
+  consecutiveTransientCaptureFailures: number;
+}
+
+/** How a phase method directs the iteration loop in `executeGoal`. */
+type PhaseOutcome<T> =
+  | { kind: 'proceed'; value: T }
+  | { kind: 'continue' }
+  | { kind: 'return'; result: TestExecutionResult };
+
+/** Per-iteration inputs shared by the action-phase methods. */
+interface ActionStepContext {
+  run: GoalRunState;
+  iteration: number;
+  stepTrace: StepTraceBuilder;
+  deviceState: DeviceState;
+  plannerResponse: PlannerResponse;
+}
+
+/** Optional result fields whose key presence varies per return path. */
+interface TerminalResultExtras {
+  analysis?: string;
+  terminalFailure?: TerminalFailureSignal;
+}
+
 const MAX_CONSECUTIVE_TRANSIENT_CAPTURE_FAILURES = 2;
 
 // ============================================================================
@@ -226,483 +261,587 @@ export class TestExecutor {
 
   /**
    * Execute the goal. Main entry point.
+   * Runs the iteration loop; each phase of a step is handled by a
+   * dedicated private method that reports back how to proceed.
    */
   async executeGoal(
     onProgress?: ExecutionProgressCallback,
   ): Promise<TestExecutionResult> {
-    const maxIterations = this._config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-    const startedAt = new Date().toISOString();
-    let history = '';
-    let remember: string[] = [];
-    let consecutiveTransientCaptureFailures = 0;
+    const run: GoalRunState = {
+      startedAt: new Date().toISOString(),
+      maxIterations: this._config.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+      history: '',
+      remember: [],
+      consecutiveTransientCaptureFailures: 0,
+    };
 
     Logger.i(`Starting goal execution: "${this._config.goal}"`);
-    Logger.i(`Max iterations: ${maxIterations}`);
+    Logger.i(`Max iterations: ${run.maxIterations}`);
 
-    for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    for (let iteration = 1; iteration <= run.maxIterations; iteration++) {
       const stepTrace = new StepTraceBuilder(iteration);
 
       if (this._aborted) {
-        return {
-          success: false,
-          status: 'aborted',
-          message: 'Goal execution was aborted',
-          platform: this._config.platform,
-          startedAt,
-          completedAt: new Date().toISOString(),
-          steps: this._steps,
-          totalIterations: iteration - 1,
-        };
+        return this._terminalResult(run, 'aborted', 'Goal execution was aborted', iteration - 1);
       }
 
-      await onProgress?.({
-        type: 'planning',
-        iteration,
-        totalIterations: maxIterations,
-        message: 'Capturing device state...',
-      });
-
-      const capturePhase = startTracePhase(iteration, 'capture.total');
-      const captureResult = await this._captureDeviceState(iteration);
-      const captureSpan = stepTrace.addSpanFromActivePhase(
-        capturePhase,
-        captureResult.status === 'success' ? 'success' : 'failure',
-        captureResult.status === 'success' ? undefined : captureResult.message,
-      );
-      stepTrace.setAction('captureDeviceState');
-      stepTrace.addSequentialTimings(
-        this._captureTraceToTimings(captureResult.captureTrace),
-        {
-          startMs: captureSpan.startMs,
-        },
-      );
-
-      if (captureResult.status !== 'success') {
-        consecutiveTransientCaptureFailures += 1;
-        stepTrace.markFailure(captureResult.message);
-        const trace = this._emitTraceSummary(stepTrace);
-        const captureStep: AgentActionResult = {
-          iteration,
-          action: 'captureDeviceState',
-          reason: captureResult.message,
-          naturalLanguageAction: 'Capture device state',
-          success: false,
-          errorMessage: captureResult.message,
-          timestamp: new Date().toISOString(),
-          durationMs: trace.totalMs,
-          trace,
-        };
-        this._steps.push(captureStep);
-
-        await onProgress?.({
-          type: 'error',
-          iteration,
-          totalIterations: maxIterations,
-          message: captureResult.message,
-        });
-
-        if (captureResult.status === 'fatal') {
-          return {
-            success: false,
-            status: 'failure',
-            message: captureResult.message,
-            platform: this._config.platform,
-            startedAt,
-            completedAt: new Date().toISOString(),
-            steps: this._steps,
-            totalIterations: iteration,
-          };
-        }
-
-        Logger.w(
-          `Transient device state capture failure (${consecutiveTransientCaptureFailures}/${MAX_CONSECUTIVE_TRANSIENT_CAPTURE_FAILURES}): ${captureResult.message}`,
-        );
-        if (
-          consecutiveTransientCaptureFailures >=
-          MAX_CONSECUTIVE_TRANSIENT_CAPTURE_FAILURES
-        ) {
-          return {
-            success: false,
-            status: 'failure',
-            message: `Repeated transient device state capture failures: ${captureResult.message}`,
-            platform: this._config.platform,
-            startedAt,
-            completedAt: new Date().toISOString(),
-            steps: this._steps,
-            totalIterations: iteration,
-          };
-        }
-
+      const capture = await this._runCapturePhase(run, iteration, stepTrace, onProgress);
+      if (capture.kind === 'return') {
+        return capture.result;
+      }
+      if (capture.kind === 'continue') {
         continue;
       }
 
-      consecutiveTransientCaptureFailures = 0;
-      const deviceState = captureResult.deviceState;
-
-      await onProgress?.({
-        type: 'planning',
+      const planning = await this._runPlanningPhase(
+        run,
         iteration,
-        totalIterations: maxIterations,
-        message: 'Thinking...',
-      });
-
-      const planningPhase = startTracePhase(iteration, 'planning.total');
-      let plannerResponse: PlannerResponse;
-      try {
-        plannerResponse = await this._config.aiAgent.plan({
-          testObjective: this._config.goal,
-          platform: this._config.platform,
-          preActionScreenshot: deviceState.screenshot,
-          hierarchy: deviceState.hierarchy,
-          history: history || undefined,
-          remember: remember.length > 0 ? remember : undefined,
-          preContext: this._config.preContext,
-          appKnowledge: this._config.appKnowledge,
-          traceStep: iteration,
-          logContext: this._config.logContext,
-        });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        const terminalFailure = terminalFailureFromError(error);
-        Logger.e('Planner call failed:', error);
-        const planningSpan = stepTrace.addSpanFromActivePhase(
-          planningPhase,
-          'failure',
-          errorMsg,
-        );
-        stepTrace.setAction('plannerError');
-        stepTrace.markFailure(errorMsg);
-        stepTrace.addSequentialTimings(undefined, { startMs: planningSpan.startMs });
-        const trace = this._emitTraceSummary(stepTrace);
-
-        this._steps.push({
-          iteration,
-          action: 'plannerError',
-          reason: errorMsg,
-          naturalLanguageAction: 'Planner error',
-          success: false,
-          errorMessage: errorMsg,
-          timestamp: new Date().toISOString(),
-          durationMs: trace.totalMs,
-          trace,
-        });
-
-        await onProgress?.({
-          type: 'error',
-          iteration,
-          totalIterations: maxIterations,
-          message: `Planner error: ${errorMsg}`,
-        });
-
-        if (terminalFailure) {
-          Logger.e(terminalFailure.message);
-          return {
-            success: false,
-            status: 'failure',
-            message: terminalFailure.message,
-            terminalFailure,
-            platform: this._config.platform,
-            startedAt,
-            completedAt: new Date().toISOString(),
-            steps: this._steps,
-            totalIterations: iteration,
-          };
-        }
+        stepTrace,
+        capture.value,
+        onProgress,
+      );
+      if (planning.kind === 'return') {
+        return planning.result;
+      }
+      if (planning.kind === 'continue') {
         continue;
       }
 
-      const planningSpan = stepTrace.addSpanFromActivePhase(planningPhase, 'success');
-      stepTrace.addSequentialTimings(
-        this._plannerTraceToTimings(plannerResponse),
-        { startMs: planningSpan.startMs },
-      );
-
-      const action = plannerResponse.act;
-      const reason = plannerResponse.reason;
-      const naturalLanguageAction = plannerResponse.thought?.act ?? reason;
-
-      Logger.i(`[${iteration}/${maxIterations}] \x1b[35mAction\x1b[0m: ${sanitizeLogField(action)} — ${sanitizeLogField(reason)}`);
-
-      stepTrace.setAction(action);
-      remember = plannerResponse.remember;
-
-      if (action === PLANNER_ACTION_COMPLETED) {
-        Logger.i('✓ Goal completed successfully!');
-        const trace = this._emitTraceSummary(stepTrace);
-        this._steps.push({
-          iteration,
-          action,
-          reason,
-          naturalLanguageAction,
-          analysis: plannerResponse.analysis,
-          thought: plannerResponse.thought,
-          actionPayload: this._buildActionPayload(plannerResponse),
-          success: true,
-          screenshot: deviceState.screenshot,
-          screenWidth: deviceState.screenWidth,
-          screenHeight: deviceState.screenHeight,
-          timestamp: new Date().toISOString(),
-          durationMs: trace.totalMs,
-          trace,
-        });
-
-        await onProgress?.({
-          type: 'goal_complete',
-          iteration,
-          totalIterations: maxIterations,
-          status: 'success',
-          action,
-          reason,
-          success: true,
-        });
-
-        return {
-          success: true,
-          status: 'success',
-          message: reason,
-          analysis: plannerResponse.analysis,
-          platform: this._config.platform,
-          startedAt,
-          completedAt: new Date().toISOString(),
-          steps: this._steps,
-          totalIterations: iteration,
-        };
-      }
-
-      if (action === PLANNER_ACTION_FAILED) {
-        Logger.w('✖ Goal failed: ' + reason);
-        stepTrace.markFailure(reason);
-        const trace = this._emitTraceSummary(stepTrace);
-        this._steps.push({
-          iteration,
-          action,
-          reason,
-          naturalLanguageAction,
-          analysis: plannerResponse.analysis,
-          thought: plannerResponse.thought,
-          actionPayload: this._buildActionPayload(plannerResponse),
-          success: false,
-          screenshot: deviceState.screenshot,
-          screenWidth: deviceState.screenWidth,
-          screenHeight: deviceState.screenHeight,
-          timestamp: new Date().toISOString(),
-          durationMs: trace.totalMs,
-          trace,
-        });
-
-        await onProgress?.({
-          type: 'goal_complete',
-          iteration,
-          totalIterations: maxIterations,
-          status: 'failure',
-          action,
-          reason,
-          success: false,
-        });
-
-        return {
-          success: false,
-          status: 'failure',
-          message: reason,
-          analysis: plannerResponse.analysis,
-          platform: this._config.platform,
-          startedAt,
-          completedAt: new Date().toISOString(),
-          steps: this._steps,
-          totalIterations: iteration,
-        };
-      }
-
-      await onProgress?.({
-        type: 'executing',
+      const terminalResult = await this._runActionPhase(
+        run,
         iteration,
-        totalIterations: maxIterations,
-        action,
-        reason,
-      });
-
-      const actionPhase = startTracePhase(iteration, 'action.total');
-      const actionResult = await this._actionExecutor.executeAction({
-        action,
-        reason,
-        text: plannerResponse.text,
-        clearText: plannerResponse.clearText,
-        direction: plannerResponse.direction,
-        durationSeconds: plannerResponse.durationSeconds,
-        url: plannerResponse.url,
-        repeat: plannerResponse.repeat,
-        delayBetweenTapMs: plannerResponse.delayBetweenTapMs,
-        screenshot: deviceState.screenshot,
-        hierarchy: deviceState.hierarchy,
-        screenWidth: deviceState.screenWidth,
-        screenHeight: deviceState.screenHeight,
-        traceStep: iteration,
-      });
-
-      const actionSpan = stepTrace.addSpanFromActivePhase(
-        actionPhase,
-        actionResult.success ? 'success' : 'failure',
-        actionResult.error,
+        stepTrace,
+        capture.value,
+        planning.value,
+        onProgress,
       );
-      stepTrace.addSequentialTimings(actionResult.trace, {
-        startMs: actionSpan.startMs,
-      });
-
-      if (actionResult.terminalFailure) {
-        stepTrace.markFailure(actionResult.terminalFailure.message);
-        const trace = this._emitTraceSummary(stepTrace);
-        this._steps.push({
-          iteration,
-          action,
-          reason,
-          naturalLanguageAction,
-          analysis: plannerResponse.analysis,
-          thought: plannerResponse.thought,
-          actionPayload: this._buildActionPayload(plannerResponse),
-          success: false,
-          errorMessage: actionResult.terminalFailure.message,
-          screenshot: deviceState.screenshot,
-          screenWidth: deviceState.screenWidth,
-          screenHeight: deviceState.screenHeight,
-          timestamp: new Date().toISOString(),
-          durationMs: trace.totalMs,
-          trace,
-        });
-
-        Logger.e(actionResult.terminalFailure.message);
-        await onProgress?.({
-          type: 'error',
-          iteration,
-          totalIterations: maxIterations,
-          message: actionResult.terminalFailure.message,
-        });
-
-        return {
-          success: false,
-          status: 'failure',
-          message: actionResult.terminalFailure.message,
-          terminalFailure: actionResult.terminalFailure,
-          analysis: plannerResponse.analysis,
-          platform: this._config.platform,
-          startedAt,
-          completedAt: new Date().toISOString(),
-          steps: this._steps,
-          totalIterations: iteration,
-        };
+      if (terminalResult) {
+        return terminalResult;
       }
-
-      const postCapturePhase = startTracePhase(iteration, 'post_capture.total');
-      const postActionCapture = await this._capturePostActionScreenshot(iteration);
-      const postCaptureSpan = stepTrace.addSpanFromActivePhase(
-        postCapturePhase,
-        postActionCapture.status === 'success' ? 'success' : 'failure',
-        postActionCapture.status === 'success' ? undefined : postActionCapture.message,
-      );
-      stepTrace.addSequentialTimings(
-        this._captureTraceToTimings(postActionCapture.captureTrace, 'post_capture'),
-        {
-          startMs: postCaptureSpan.startMs,
-        },
-      );
-
-      if (postActionCapture.status !== 'success') {
-        Logger.w(
-          `Post-action screenshot capture failed for iteration ${iteration}: ${postActionCapture.message ?? 'unknown capture error'}`,
-        );
-      }
-
-      // Aggregate LLM calls for this step: planner call + any grounder/visual-grounder
-      // calls made by ActionExecutor. Order: planner first, then action calls.
-      const stepLLMCalls: LLMCallTrace[] = [];
-      if (plannerResponse.llmCall) {
-        stepLLMCalls.push(plannerResponse.llmCall);
-      }
-      if (actionResult.llmCalls && actionResult.llmCalls.length > 0) {
-        stepLLMCalls.push(...actionResult.llmCalls);
-      }
-
-      const stepResult: AgentActionResult = {
-        iteration,
-        action,
-        reason,
-        naturalLanguageAction,
-        analysis: plannerResponse.analysis,
-        thought: plannerResponse.thought,
-        actionPayload: this._buildActionPayload(plannerResponse),
-        success: actionResult.success,
-        errorMessage: actionResult.error,
-        screenshot: postActionCapture.screenshot,
-        screenWidth: postActionCapture.screenWidth ?? deviceState.screenWidth,
-        screenHeight: postActionCapture.screenHeight ?? deviceState.screenHeight,
-        timestamp: new Date().toISOString(),
-        timing: actionResult.trace,
-        ...(stepLLMCalls.length > 0 ? { llmCalls: stepLLMCalls } : {}),
-      };
-
-      if (!actionResult.success && actionResult.error) {
-        stepTrace.markFailure(actionResult.error);
-      }
-
-      const trace = this._emitTraceSummary(stepTrace);
-      stepResult.trace = trace;
-      stepResult.durationMs = trace.totalMs;
-      this._steps.push(stepResult);
-
-      await onProgress?.({
-        type: 'step_complete',
-        iteration,
-        totalIterations: maxIterations,
-        action,
-        reason,
-        success: actionResult.success,
-        message: actionResult.error,
-        stepResult,
-      });
-
-      const statusText = actionResult.success ? 'SUCCESS' : `FAILED: ${actionResult.error}`;
-      history += `${iteration}. [${action}] ${this._formatHistoryReason(plannerResponse)} → ${statusText}\n`;
     }
 
-    Logger.w(`Max iterations (${maxIterations}) reached`);
-    return {
-      success: false,
-      status: 'failure',
-      message: `Max iterations (${maxIterations}) exceeded without completing the goal`,
-      platform: this._config.platform,
-      startedAt,
-      completedAt: new Date().toISOString(),
-      steps: this._steps,
-      totalIterations: maxIterations,
-    };
+    Logger.w(`Max iterations (${run.maxIterations}) reached`);
+    return this._terminalResult(
+      run,
+      'failure',
+      `Max iterations (${run.maxIterations}) exceeded without completing the goal`,
+      run.maxIterations,
+    );
   }
 
   // ---------- private ----------
+
+  /**
+   * Build a final TestExecutionResult. `extras` is spread verbatim between
+   * `message` and `platform` so each return path keeps the exact key set and
+   * key order of its original inline literal.
+   */
+  private _terminalResult(
+    run: GoalRunState,
+    status: ExecutionStatus,
+    message: string,
+    totalIterations: number,
+    extras: TerminalResultExtras = {},
+  ): TestExecutionResult {
+    return {
+      success: status === 'success',
+      status,
+      message,
+      ...extras,
+      platform: this._config.platform,
+      startedAt: run.startedAt,
+      completedAt: new Date().toISOString(),
+      steps: this._steps,
+      totalIterations,
+    };
+  }
+
+  /** Phase 1: capture device state (screenshot + hierarchy) and record its trace. */
+  private async _runCapturePhase(
+    run: GoalRunState,
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<PhaseOutcome<DeviceState>> {
+    await onProgress?.({
+      type: 'planning',
+      iteration,
+      totalIterations: run.maxIterations,
+      message: 'Capturing device state...',
+    });
+
+    const capturePhase = startTracePhase(iteration, 'capture.total');
+    const captureResult = await this._captureDeviceState(iteration);
+    const captureSpan = stepTrace.addSpanFromActivePhase(
+      capturePhase,
+      captureResult.status === 'success' ? 'success' : 'failure',
+      captureResult.status === 'success' ? undefined : captureResult.message,
+    );
+    stepTrace.setAction('captureDeviceState');
+    stepTrace.addSequentialTimings(this._captureTraceToTimings(captureResult.captureTrace), {
+      startMs: captureSpan.startMs,
+    });
+
+    if (captureResult.status !== 'success') {
+      return this._handleCaptureFailure(run, iteration, stepTrace, captureResult, onProgress);
+    }
+
+    run.consecutiveTransientCaptureFailures = 0;
+    return { kind: 'proceed', value: captureResult.deviceState };
+  }
+
+  /** Record a capture failure step and decide: fatal/repeated → end the run, else retry. */
+  private async _handleCaptureFailure(
+    run: GoalRunState,
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+    captureResult: Extract<DeviceStateCaptureResult, { status: 'transient' | 'fatal' }>,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<PhaseOutcome<DeviceState>> {
+    run.consecutiveTransientCaptureFailures += 1;
+    stepTrace.markFailure(captureResult.message);
+    const trace = this._emitTraceSummary(stepTrace);
+    this._steps.push({
+      iteration,
+      action: 'captureDeviceState',
+      reason: captureResult.message,
+      naturalLanguageAction: 'Capture device state',
+      success: false,
+      errorMessage: captureResult.message,
+      timestamp: new Date().toISOString(),
+      durationMs: trace.totalMs,
+      trace,
+    });
+
+    await onProgress?.({
+      type: 'error',
+      iteration,
+      totalIterations: run.maxIterations,
+      message: captureResult.message,
+    });
+
+    if (captureResult.status === 'fatal') {
+      return {
+        kind: 'return',
+        result: this._terminalResult(run, 'failure', captureResult.message, iteration),
+      };
+    }
+
+    Logger.w(
+      `Transient device state capture failure (${run.consecutiveTransientCaptureFailures}/${MAX_CONSECUTIVE_TRANSIENT_CAPTURE_FAILURES}): ${captureResult.message}`,
+    );
+    if (run.consecutiveTransientCaptureFailures >= MAX_CONSECUTIVE_TRANSIENT_CAPTURE_FAILURES) {
+      return {
+        kind: 'return',
+        result: this._terminalResult(
+          run,
+          'failure',
+          `Repeated transient device state capture failures: ${captureResult.message}`,
+          iteration,
+        ),
+      };
+    }
+
+    return { kind: 'continue' };
+  }
+
+  /** Phase 2: call the AI planner with accumulated history/memory and record its trace. */
+  private async _runPlanningPhase(
+    run: GoalRunState,
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+    deviceState: DeviceState,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<PhaseOutcome<PlannerResponse>> {
+    await onProgress?.({
+      type: 'planning',
+      iteration,
+      totalIterations: run.maxIterations,
+      message: 'Thinking...',
+    });
+
+    const planningPhase = startTracePhase(iteration, 'planning.total');
+    let plannerResponse: PlannerResponse;
+    try {
+      plannerResponse = await this._config.aiAgent.plan({
+        testObjective: this._config.goal,
+        platform: this._config.platform,
+        preActionScreenshot: deviceState.screenshot,
+        hierarchy: deviceState.hierarchy,
+        history: run.history || undefined,
+        remember: run.remember.length > 0 ? run.remember : undefined,
+        preContext: this._config.preContext,
+        appKnowledge: this._config.appKnowledge,
+        traceStep: iteration,
+        logContext: this._config.logContext,
+      });
+    } catch (error) {
+      return this._handlePlannerError(run, iteration, stepTrace, planningPhase, error, onProgress);
+    }
+
+    const planningSpan = stepTrace.addSpanFromActivePhase(planningPhase, 'success');
+    stepTrace.addSequentialTimings(this._plannerTraceToTimings(plannerResponse), {
+      startMs: planningSpan.startMs,
+    });
+
+    Logger.i(
+      `[${iteration}/${run.maxIterations}] \x1b[35mAction\x1b[0m: ${sanitizeLogField(plannerResponse.act)} — ${sanitizeLogField(plannerResponse.reason)}`,
+    );
+    stepTrace.setAction(plannerResponse.act);
+    run.remember = plannerResponse.remember;
+
+    return { kind: 'proceed', value: plannerResponse };
+  }
+
+  /** Record a planner-call failure step; terminal provider errors end the run. */
+  private async _handlePlannerError(
+    run: GoalRunState,
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+    planningPhase: ActiveTracePhase | null,
+    error: unknown,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<PhaseOutcome<PlannerResponse>> {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const terminalFailure = terminalFailureFromError(error);
+    Logger.e('Planner call failed:', error);
+    const planningSpan = stepTrace.addSpanFromActivePhase(planningPhase, 'failure', errorMsg);
+    stepTrace.setAction('plannerError');
+    stepTrace.markFailure(errorMsg);
+    stepTrace.addSequentialTimings(undefined, { startMs: planningSpan.startMs });
+    const trace = this._emitTraceSummary(stepTrace);
+
+    this._steps.push({
+      iteration,
+      action: 'plannerError',
+      reason: errorMsg,
+      naturalLanguageAction: 'Planner error',
+      success: false,
+      errorMessage: errorMsg,
+      timestamp: new Date().toISOString(),
+      durationMs: trace.totalMs,
+      trace,
+    });
+
+    await onProgress?.({
+      type: 'error',
+      iteration,
+      totalIterations: run.maxIterations,
+      message: `Planner error: ${errorMsg}`,
+    });
+
+    if (terminalFailure) {
+      Logger.e(terminalFailure.message);
+      return {
+        kind: 'return',
+        result: this._terminalResult(run, 'failure', terminalFailure.message, iteration, {
+          terminalFailure,
+        }),
+      };
+    }
+
+    return { kind: 'continue' };
+  }
+
+  /**
+   * Phases 3-6: handle terminal planner verdicts, execute the planned action,
+   * capture the post-action screenshot, and record the completed step.
+   * Returns a final result when the run must end, undefined to keep iterating.
+   */
+  private async _runActionPhase(
+    run: GoalRunState,
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+    deviceState: DeviceState,
+    plannerResponse: PlannerResponse,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<TestExecutionResult | undefined> {
+    const step: ActionStepContext = { run, iteration, stepTrace, deviceState, plannerResponse };
+    const action = plannerResponse.act;
+
+    if (action === PLANNER_ACTION_COMPLETED || action === PLANNER_ACTION_FAILED) {
+      return this._finishGoalFromPlanner(step, onProgress);
+    }
+
+    await onProgress?.({
+      type: 'executing',
+      iteration,
+      totalIterations: run.maxIterations,
+      action,
+      reason: plannerResponse.reason,
+    });
+
+    const actionResult = await this._executePlannedAction(step);
+    if (actionResult.terminalFailure) {
+      return this._reportActionTerminalFailure(step, actionResult.terminalFailure, onProgress);
+    }
+
+    const postActionCapture = await this._runPostCapturePhase(iteration, stepTrace);
+    await this._recordStepCompletion(step, actionResult, postActionCapture, onProgress);
+    return undefined;
+  }
+
+  /** The planner declared the goal completed or failed: record the final step and finish. */
+  private async _finishGoalFromPlanner(
+    step: ActionStepContext,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<TestExecutionResult> {
+    const { run, iteration, stepTrace, deviceState, plannerResponse } = step;
+    const succeeded = plannerResponse.act === PLANNER_ACTION_COMPLETED;
+    if (succeeded) {
+      Logger.i('✓ Goal completed successfully!');
+    } else {
+      Logger.w('✖ Goal failed: ' + plannerResponse.reason);
+      stepTrace.markFailure(plannerResponse.reason);
+    }
+
+    const trace = this._emitTraceSummary(stepTrace);
+    this._steps.push({
+      iteration,
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      naturalLanguageAction: plannerResponse.thought?.act ?? plannerResponse.reason,
+      analysis: plannerResponse.analysis,
+      thought: plannerResponse.thought,
+      actionPayload: this._buildActionPayload(plannerResponse),
+      success: succeeded,
+      screenshot: deviceState.screenshot,
+      screenWidth: deviceState.screenWidth,
+      screenHeight: deviceState.screenHeight,
+      timestamp: new Date().toISOString(),
+      durationMs: trace.totalMs,
+      trace,
+    });
+
+    await onProgress?.({
+      type: 'goal_complete',
+      iteration,
+      totalIterations: run.maxIterations,
+      status: succeeded ? 'success' : 'failure',
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      success: succeeded,
+    });
+
+    return this._terminalResult(
+      run,
+      succeeded ? 'success' : 'failure',
+      plannerResponse.reason,
+      iteration,
+      { analysis: plannerResponse.analysis },
+    );
+  }
+
+  /** Phase 4: execute the planner's action on the device and record its trace. */
+  private async _executePlannedAction(step: ActionStepContext): Promise<ActionOutput> {
+    const { iteration, stepTrace, deviceState, plannerResponse } = step;
+    const actionPhase = startTracePhase(iteration, 'action.total');
+    const actionResult = await this._actionExecutor.executeAction({
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      text: plannerResponse.text,
+      clearText: plannerResponse.clearText,
+      direction: plannerResponse.direction,
+      durationSeconds: plannerResponse.durationSeconds,
+      url: plannerResponse.url,
+      repeat: plannerResponse.repeat,
+      delayBetweenTapMs: plannerResponse.delayBetweenTapMs,
+      screenshot: deviceState.screenshot,
+      hierarchy: deviceState.hierarchy,
+      screenWidth: deviceState.screenWidth,
+      screenHeight: deviceState.screenHeight,
+      traceStep: iteration,
+    });
+
+    const actionSpan = stepTrace.addSpanFromActivePhase(
+      actionPhase,
+      actionResult.success ? 'success' : 'failure',
+      actionResult.error,
+    );
+    stepTrace.addSequentialTimings(actionResult.trace, { startMs: actionSpan.startMs });
+    return actionResult;
+  }
+
+  /** A terminal AI-provider failure occurred during the action: record it and end the run. */
+  private async _reportActionTerminalFailure(
+    step: ActionStepContext,
+    terminalFailure: TerminalFailureSignal,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<TestExecutionResult> {
+    const { run, iteration, stepTrace, deviceState, plannerResponse } = step;
+    stepTrace.markFailure(terminalFailure.message);
+    const trace = this._emitTraceSummary(stepTrace);
+    this._steps.push({
+      iteration,
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      naturalLanguageAction: plannerResponse.thought?.act ?? plannerResponse.reason,
+      analysis: plannerResponse.analysis,
+      thought: plannerResponse.thought,
+      actionPayload: this._buildActionPayload(plannerResponse),
+      success: false,
+      errorMessage: terminalFailure.message,
+      screenshot: deviceState.screenshot,
+      screenWidth: deviceState.screenWidth,
+      screenHeight: deviceState.screenHeight,
+      timestamp: new Date().toISOString(),
+      durationMs: trace.totalMs,
+      trace,
+    });
+
+    Logger.e(terminalFailure.message);
+    await onProgress?.({
+      type: 'error',
+      iteration,
+      totalIterations: run.maxIterations,
+      message: terminalFailure.message,
+    });
+
+    return this._terminalResult(run, 'failure', terminalFailure.message, iteration, {
+      terminalFailure,
+      analysis: plannerResponse.analysis,
+    });
+  }
+
+  /** Phase 5: capture the post-action screenshot; failures are logged, never fatal. */
+  private async _runPostCapturePhase(
+    iteration: number,
+    stepTrace: StepTraceBuilder,
+  ): Promise<PostActionCaptureResult> {
+    const postCapturePhase = startTracePhase(iteration, 'post_capture.total');
+    const postActionCapture = await this._capturePostActionScreenshot(iteration);
+    const postCaptureSpan = stepTrace.addSpanFromActivePhase(
+      postCapturePhase,
+      postActionCapture.status === 'success' ? 'success' : 'failure',
+      postActionCapture.status === 'success' ? undefined : postActionCapture.message,
+    );
+    stepTrace.addSequentialTimings(
+      this._captureTraceToTimings(postActionCapture.captureTrace, 'post_capture'),
+      { startMs: postCaptureSpan.startMs },
+    );
+
+    if (postActionCapture.status !== 'success') {
+      Logger.w(
+        `Post-action screenshot capture failed for iteration ${iteration}: ${postActionCapture.message ?? 'unknown capture error'}`,
+      );
+    }
+
+    return postActionCapture;
+  }
+
+  /**
+   * Aggregate LLM calls for a step: planner call + any grounder/visual-grounder
+   * calls made by ActionExecutor. Order: planner first, then action calls.
+   */
+  private _collectStepLLMCalls(
+    plannerResponse: PlannerResponse,
+    actionResult: ActionOutput,
+  ): LLMCallTrace[] {
+    const stepLLMCalls: LLMCallTrace[] = [];
+    if (plannerResponse.llmCall) {
+      stepLLMCalls.push(plannerResponse.llmCall);
+    }
+    if (actionResult.llmCalls && actionResult.llmCalls.length > 0) {
+      stepLLMCalls.push(...actionResult.llmCalls);
+    }
+    return stepLLMCalls;
+  }
+
+  /** Phase 6: build the completed step record, emit progress, and extend history. */
+  private async _recordStepCompletion(
+    step: ActionStepContext,
+    actionResult: ActionOutput,
+    postActionCapture: PostActionCaptureResult,
+    onProgress?: ExecutionProgressCallback,
+  ): Promise<void> {
+    const { run, iteration, stepTrace, deviceState, plannerResponse } = step;
+    const stepLLMCalls = this._collectStepLLMCalls(plannerResponse, actionResult);
+    const stepResult: AgentActionResult = {
+      iteration,
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      naturalLanguageAction: plannerResponse.thought?.act ?? plannerResponse.reason,
+      analysis: plannerResponse.analysis,
+      thought: plannerResponse.thought,
+      actionPayload: this._buildActionPayload(plannerResponse),
+      success: actionResult.success,
+      errorMessage: actionResult.error,
+      screenshot: postActionCapture.screenshot,
+      screenWidth: postActionCapture.screenWidth ?? deviceState.screenWidth,
+      screenHeight: postActionCapture.screenHeight ?? deviceState.screenHeight,
+      timestamp: new Date().toISOString(),
+      timing: actionResult.trace,
+      ...(stepLLMCalls.length > 0 ? { llmCalls: stepLLMCalls } : {}),
+    };
+
+    if (!actionResult.success && actionResult.error) {
+      stepTrace.markFailure(actionResult.error);
+    }
+
+    const trace = this._emitTraceSummary(stepTrace);
+    stepResult.trace = trace;
+    stepResult.durationMs = trace.totalMs;
+    this._steps.push(stepResult);
+
+    await onProgress?.({
+      type: 'step_complete',
+      iteration,
+      totalIterations: run.maxIterations,
+      action: plannerResponse.act,
+      reason: plannerResponse.reason,
+      success: actionResult.success,
+      message: actionResult.error,
+      stepResult,
+    });
+
+    const statusText = actionResult.success ? 'SUCCESS' : `FAILED: ${actionResult.error}`;
+    run.history += `${iteration}. [${plannerResponse.act}] ${this._formatHistoryReason(plannerResponse)} → ${statusText}\n`;
+  }
+
+  /** Request a stabilized screenshot + hierarchy payload and parse its capture trace. */
+  private async _requestCapture(traceStep: number): Promise<{
+    response: Awaited<ReturnType<DeviceAgent['executeAction']>>;
+    captureTrace: CaptureTraceMetadata | undefined;
+  }> {
+    const response = await this._config.agent.executeAction(
+      new DeviceActionRequest({
+        requestId: uuidv4(),
+        action: new GetScreenshotAndHierarchyAction(),
+        timeout: 30,
+        shouldEnsureStability: true,
+        traceStep,
+      }),
+    );
+
+    const captureTrace = response.data
+      ? this._parseCaptureTrace(response.data['captureTrace'])
+      : undefined;
+
+    return { response, captureTrace };
+  }
+
+  private _classifyCaptureFailure(
+    message: string,
+    captureTrace?: CaptureTraceMetadata,
+  ): { status: 'transient' | 'fatal'; message: string; captureTrace?: CaptureTraceMetadata } {
+    return {
+      status: this._isTransientCaptureFailure(message) ? 'transient' : 'fatal',
+      message,
+      captureTrace,
+    };
+  }
 
   private async _captureDeviceState(
     traceStep: number,
   ): Promise<DeviceStateCaptureResult> {
     try {
-      const response = await this._config.agent.executeAction(
-        new DeviceActionRequest({
-          requestId: uuidv4(),
-          action: new GetScreenshotAndHierarchyAction(),
-          timeout: 30,
-          shouldEnsureStability: true,
-          traceStep,
-        }),
-      );
-
-      const captureTrace = response.data
-        ? this._parseCaptureTrace(response.data['captureTrace'])
-        : undefined;
+      const { response, captureTrace } = await this._requestCapture(traceStep);
 
       if (!response.success || !response.data) {
-        const message = response.message ?? 'Failed to capture device state';
-        return {
-          status: this._isTransientCaptureFailure(message) ? 'transient' : 'fatal',
-          message,
+        return this._classifyCaptureFailure(
+          response.message ?? 'Failed to capture device state',
           captureTrace,
-        };
+        );
       }
 
       const data = response.data;
@@ -727,24 +866,18 @@ export class TestExecutor {
         };
       }
 
-      const hierarchy = Hierarchy.fromJsonString(hierarchyStr);
-
       return {
         status: 'success',
         captureTrace,
         deviceState: {
           screenshot,
-          hierarchy,
+          hierarchy: Hierarchy.fromJsonString(hierarchyStr),
           screenWidth,
           screenHeight,
         },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        status: this._isTransientCaptureFailure(message) ? 'transient' : 'fatal',
-        message,
-      };
+      return this._classifyCaptureFailure(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -791,27 +924,13 @@ export class TestExecutor {
     traceStep: number,
   ): Promise<PostActionCaptureResult> {
     try {
-      const response = await this._config.agent.executeAction(
-        new DeviceActionRequest({
-          requestId: uuidv4(),
-          action: new GetScreenshotAndHierarchyAction(),
-          timeout: 30,
-          shouldEnsureStability: true,
-          traceStep,
-        }),
-      );
-
-      const captureTrace = response.data
-        ? this._parseCaptureTrace(response.data['captureTrace'])
-        : undefined;
+      const { response, captureTrace } = await this._requestCapture(traceStep);
 
       if (!response.success || !response.data) {
-        const message = response.message ?? 'Failed to capture post-action screenshot';
-        return {
-          status: this._isTransientCaptureFailure(message) ? 'transient' : 'fatal',
-          message,
+        return this._classifyCaptureFailure(
+          response.message ?? 'Failed to capture post-action screenshot',
           captureTrace,
-        };
+        );
       }
 
       const data = response.data;
@@ -828,21 +947,13 @@ export class TestExecutor {
         status: 'success',
         screenshot,
         screenWidth:
-          typeof data['screenWidth'] === 'number'
-            ? (data['screenWidth'] as number)
-            : undefined,
+          typeof data['screenWidth'] === 'number' ? (data['screenWidth'] as number) : undefined,
         screenHeight:
-          typeof data['screenHeight'] === 'number'
-            ? (data['screenHeight'] as number)
-            : undefined,
+          typeof data['screenHeight'] === 'number' ? (data['screenHeight'] as number) : undefined,
         captureTrace,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        status: this._isTransientCaptureFailure(message) ? 'transient' : 'fatal',
-        message,
-      };
+      return this._classifyCaptureFailure(error instanceof Error ? error.message : String(error));
     }
   }
 
