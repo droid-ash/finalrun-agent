@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -85,7 +86,10 @@ function zipAppBundle(appPath: string, basename: string): PreparedApp {
   const zip = new AdmZip();
   zip.addLocalFolder(appPath, basename);
 
-  const zipPath = path.join(os.tmpdir(), `finalrun-app-${Date.now()}.zip`);
+  // Timestamp keeps an orphaned temp file diagnosable; the random component is
+  // what makes concurrent submissions collision-proof (same-millisecond runs
+  // would otherwise share one path and corrupt/unlink each other's upload).
+  const zipPath = path.join(os.tmpdir(), `finalrun-app-${Date.now()}-${randomUUID()}.zip`);
   zip.writeZip(zipPath);
   const size = fs.statSync(zipPath).size;
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

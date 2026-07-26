@@ -417,6 +417,114 @@ test('submitRun surfaces an unparseable 201 body as a rejection', async () => {
   }
 });
 
+/** Runs fn with Date.now stubbed to a constant so two concurrent submissions
+ *  receive an identical timestamp — the temp-name collision is deterministic,
+ *  not a race the clock can spuriously win. Restored in a finally. */
+async function withFixedDateNow<T>(fn: () => Promise<T>): Promise<T> {
+  const originalDateNow = Date.now;
+  Date.now = () => 1_753_500_000_000;
+  try {
+    return await fn();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
+/** Fetch stub that snapshots tempZipArtifacts() on each call and holds the
+ *  first submission open until the second is also in flight, so the second
+ *  snapshot observes both runs' temp artifacts simultaneously — before either
+ *  cleanup finally can unlink anything. */
+function installBarrierFetchStub(): { snapshots: string[][]; restore: () => void } {
+  let releaseFirst!: () => void;
+  const secondArrived = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const snapshots: string[][] = [];
+  const stub = installFetchStub(async () => {
+    snapshots.push(tempZipArtifacts());
+    if (snapshots.length === 1) {
+      await secondArrived;
+    } else {
+      releaseFirst();
+    }
+    return okResponse();
+  });
+  return { snapshots, restore: stub.restore };
+}
+
+// Bounded: the fetch barrier parks one submission until the other arrives, so a
+// pathological interleaving that never delivers the second would hang instead of
+// failing. The timeout turns that into a red test.
+test('two concurrent submissions sharing a millisecond get distinct spec-zip temp names, both cleaned up', { timeout: 10_000 }, async () => {
+  // Regression test for the same-millisecond spec-zip collision: with no
+  // random component in the name, two submitRun calls whose writeSpecZip
+  // lands in the same Date.now() millisecond resolve to ONE shared path —
+  // the second write truncates the first's in-flight archive, and the first
+  // finally to run unlinks it out from under the other upload.
+  const before = tempZipArtifacts();
+  const barrier = installBarrierFetchStub();
+  try {
+    await withFixedDateNow(() => Promise.all([submitRun(makeInput()), submitRun(makeInput())]));
+  } finally {
+    barrier.restore();
+  }
+
+  assert.equal(barrier.snapshots.length, 2, 'both submissions must reach the upload');
+  const inFlight = barrier.snapshots[1];
+  const newCloudZips = inFlight.filter(
+    (name) => name.startsWith('finalrun-cloud-') && !before.includes(name),
+  );
+  assert.equal(
+    newCloudZips.length,
+    2,
+    `two distinct in-flight spec-zip names must coexist, saw: ${JSON.stringify(newCloudZips)}`,
+  );
+  assert.deepEqual(tempZipArtifacts(), before, 'both spec zips must be removed after the submissions complete');
+});
+
+// Bounded: the fetch barrier parks one submission until the other arrives, so a
+// pathological interleaving that never delivers the second would hang instead of
+// failing. The timeout turns that into a red test.
+test('two concurrent .app submissions sharing a millisecond get distinct app-zip temp names, both cleaned up', { timeout: 10_000 }, async () => {
+  // Same collision, other naming site: zipAppBundle's temp .app.zip in
+  // os.tmpdir() must stay unique across submissions that share a timestamp.
+  const before = tempZipArtifacts();
+  const bundleA = path.join(makeTempDir('appdir'), 'TwinA.app');
+  fs.mkdirSync(bundleA);
+  fs.writeFileSync(path.join(bundleA, 'Info.plist'), 'plist-a');
+  const bundleB = path.join(makeTempDir('appdir'), 'TwinB.app');
+  fs.mkdirSync(bundleB);
+  fs.writeFileSync(path.join(bundleB, 'Info.plist'), 'plist-b');
+
+  const barrier = installBarrierFetchStub();
+  try {
+    await withFixedDateNow(() =>
+      Promise.all([
+        submitRun(makeInput({ appPath: bundleA })),
+        submitRun(makeInput({ appPath: bundleB })),
+      ]),
+    );
+  } finally {
+    barrier.restore();
+  }
+
+  assert.equal(barrier.snapshots.length, 2, 'both submissions must reach the upload');
+  const inFlight = barrier.snapshots[1];
+  const newAppZips = inFlight.filter(
+    (name) => name.startsWith('finalrun-app-') && !before.includes(name),
+  );
+  assert.equal(
+    newAppZips.length,
+    2,
+    `two distinct in-flight app-zip names must coexist, saw: ${JSON.stringify(newAppZips)}`,
+  );
+  assert.deepEqual(
+    tempZipArtifacts(),
+    before,
+    'both temp app zips and both spec zips must be removed after the submissions complete',
+  );
+});
+
 test('the module throws at load time when FINALRUN_SUBMIT_TIMEOUT_MS is invalid', () => {
   // SUBMIT_TIMEOUT_MS is a module-level const evaluated on first load, so the
   // validation throw is only reachable by re-evaluating the module. The

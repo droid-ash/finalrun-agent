@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { openAsBlob } from 'node:fs';
 import * as os from 'node:os';
@@ -222,7 +223,10 @@ function writeSpecZip(filesToZip: FileToZip[]): string {
     zip.addLocalFile(file.absolutePath, dir);
   }
 
-  const zipPath = path.join(os.tmpdir(), `finalrun-cloud-${Date.now()}.zip`);
+  // Timestamp keeps an orphaned temp file diagnosable; the random component is
+  // what makes concurrent submissions collision-proof (same-millisecond runs
+  // would otherwise share one path and corrupt/unlink each other's upload).
+  const zipPath = path.join(os.tmpdir(), `finalrun-cloud-${Date.now()}-${randomUUID()}.zip`);
   zip.writeZip(zipPath);
   return zipPath;
 }
