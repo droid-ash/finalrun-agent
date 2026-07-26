@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T06:38:37Z"}
+{"args":"Write characterization tests for cloud-core (currently zero tests), then refactor submitRun (175 lines, complexity\u003e12); swap cloud-core's tolerant test runner for the strict shared runner.","cmd":"fab-new","event":"command","ts":"2026-07-26T06:38:37Z"}
