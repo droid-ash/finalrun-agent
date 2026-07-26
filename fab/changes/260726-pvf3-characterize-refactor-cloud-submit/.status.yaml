@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 12
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-26T08:45:44Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T09:05:13Z"}
     review: {started_at: "2026-07-26T09:05:13Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T09:18:13Z"}
     hydrate: {started_at: "2026-07-26T09:18:13Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T09:23:35Z"}
-    ship: {started_at: "2026-07-26T09:23:35Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-26T09:23:35Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T09:26:14Z"}
+    review-pr: {started_at: "2026-07-26T09:26:14Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/156
 change_type_source: explicit
 true_impact:
-    added: 32
-    deleted: 0
-    net: 32
+    added: 1243
+    deleted: 245
+    net: 998
     tests:
-        added: 0
+        added: 408
         deleted: 0
-        net: 0
-    computed_at: "2026-07-26T09:23:35Z"
-    computed_at_stage: hydrate
+        net: 408
+    computed_at: "2026-07-26T09:26:14Z"
+    computed_at_stage: ship
 summary: Characterization tests for cloud-core submitRun, phase-helper refactor, and graduation to the shared strict test runner
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-26T09:23:35Z
+last_updated: 2026-07-26T09:26:14Z
