@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T01:42:07Z"}
+{"args":"Refactor the two largest well-tested functions: TestExecutor.ts:230 (405 lines) and testRunner.ts runTests (280 lines), using their existing 7 + 22 tests as the safety net.","cmd":"fab-new","event":"command","ts":"2026-07-26T01:42:07Z"}
