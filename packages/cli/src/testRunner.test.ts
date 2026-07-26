@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   Logger,
   redactResolvedValue,
+  type LoggerSink,
   type TestDefinition,
   type RuntimeBindings,
 } from '@finalrun/common';
@@ -89,6 +90,22 @@ function writeWorkspaceConfig(
   }
   fs.mkdirSync(path.join(rootDir, '.finalrun'), { recursive: true });
   fs.writeFileSync(path.join(rootDir, '.finalrun', 'config.yaml'), `${lines.join('\n')}\n`, 'utf-8');
+}
+
+function createSingleTestWorkspace(prefix: string): string {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  writeWorkspaceConfig(rootDir);
+  const testsDir = path.join(rootDir, '.finalrun', 'tests');
+  const envDir = path.join(rootDir, '.finalrun', 'env');
+  fs.mkdirSync(testsDir, { recursive: true });
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(path.join(envDir, 'dev.yaml'), '{}\n', 'utf-8');
+  fs.writeFileSync(
+    path.join(testsDir, 'login.yaml'),
+    ['name: login', 'steps:', '  - Open the login screen.'].join('\n'),
+    'utf-8',
+  );
+  return rootDir;
 }
 
 const originalRunHostPreflight = testRunnerDependencies.runHostPreflight;
@@ -1273,6 +1290,111 @@ test('runTests requests a forced exit after a second SIGINT', async () => {
     testRunnerDependencies.executeTestOnSession = originalExecuteTestOnSession;
     testRunnerDependencies.addSigintListener = originalAddSigintListener;
     testRunnerDependencies.exitProcess = originalExitProcess;
+    await fsp.rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runTests releases the device session when SIGINT arrives during session preparation', async () => {
+  const rootDir = createSingleTestWorkspace('finalrun-abort-after-prepare-');
+
+  const originalPrepareTestSession = testRunnerDependencies.prepareTestSession;
+  const originalExecuteTestOnSession = testRunnerDependencies.executeTestOnSession;
+  const originalAddSigintListener = testRunnerDependencies.addSigintListener;
+  let cleanupCalls = 0;
+  let executeCalls = 0;
+  let sigintListener: (() => void) | undefined;
+
+  testRunnerDependencies.addSigintListener = (listener) => {
+    sigintListener = listener;
+    return () => {
+      if (sigintListener === listener) {
+        sigintListener = undefined;
+      }
+    };
+  };
+  testRunnerDependencies.prepareTestSession = async () => {
+    // SIGINT lands while device preparation is in flight: the prepared
+    // session is still handed back, and the runner must release it on the
+    // abort path instead of stranding device resources.
+    assert.equal(typeof sigintListener, 'function');
+    sigintListener?.();
+    return createTestSession({
+      cleanup: async () => {
+        cleanupCalls += 1;
+      },
+    });
+  };
+  testRunnerDependencies.executeTestOnSession = async () => {
+    executeCalls += 1;
+    return createTestExecutionResult();
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        runTests({
+          envName: 'dev',
+          cwd: rootDir,
+          selectors: ['login.yaml'],
+          apiKeys: { openai: 'test-key' },
+          defaults: { provider: 'openai', modelName: 'gpt-5.4-mini' },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof PreExecutionFailureError);
+        assert.equal(error.phase, 'setup');
+        assert.equal(error.message, 'Run aborted before execution.');
+        assert.equal(error.exitCode, 130);
+        return true;
+      },
+    );
+    assert.equal(executeCalls, 0);
+    assert.equal(cleanupCalls, 1);
+    await assertNoRunArtifacts(rootDir);
+  } finally {
+    testRunnerDependencies.prepareTestSession = originalPrepareTestSession;
+    testRunnerDependencies.executeTestOnSession = originalExecuteTestOnSession;
+    testRunnerDependencies.addSigintListener = originalAddSigintListener;
+    await fsp.rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runTests removes every log sink it registered when validation fails before execution', async () => {
+  const rootDir = createSingleTestWorkspace('finalrun-sink-cleanup-');
+
+  // Spy on the public Logger sink API (no coupling to Logger internals):
+  // every sink added during the run must be removed by the time it settles.
+  const originalAddSink = Logger.addSink;
+  const originalRemoveSink = Logger.removeSink;
+  const danglingSinks = new Set<LoggerSink>();
+  Logger.addSink = (sink: LoggerSink): void => {
+    danglingSinks.add(sink);
+    originalAddSink.call(Logger, sink);
+  };
+  Logger.removeSink = (sink: LoggerSink): void => {
+    danglingSinks.delete(sink);
+    originalRemoveSink.call(Logger, sink);
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        runTests({
+          envName: 'dev',
+          cwd: rootDir,
+          apiKeys: { openai: 'test-key' },
+          defaults: { provider: 'openai', modelName: 'gpt-5.4-mini' },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof PreExecutionFailureError);
+        assert.equal(error.phase, 'validation');
+        assert.match(error.message, /At least one test selector is required/);
+        return true;
+      },
+    );
+    assert.equal(danglingSinks.size, 0);
+  } finally {
+    Logger.addSink = originalAddSink;
+    Logger.removeSink = originalRemoveSink;
     await fsp.rm(rootDir, { recursive: true, force: true });
   }
 });

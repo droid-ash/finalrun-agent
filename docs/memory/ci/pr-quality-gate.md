@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are cleared by extracting phases behind a phase-outcome union with per-call local state."
+description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are cleared by extracting phases behind a phase-outcome union with per-call local state and `finally` blocks scoped to each resource's acquisition."
 ---
 # PR Quality Gate (ci)
 
@@ -92,3 +92,9 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 **Why**: The object's lifetime is identical to the locals it replaces, which is what makes the split behavior-preserving; mutation sites stay explicit and greppable through the `ctx.`/`run.` prefix.
 **Rejected**: (a) promoting the locals to instance fields — changes their lifetime so state survives across calls on the same instance, a real behavior change that a passing test suite does not rule out; (b) threading the values as parameter/return tuples through every helper — unreadable past about three pieces of state, and every added phase perturbs every signature.
 *Introduced by*: 260726-vzi3-split-testexecutor-runtests
+
+### `finally` scope follows the acquisition, not the phase split
+**Decision**: A resource is released by a `finally` whose `try` opens immediately after the acquisition, and any guard that can throw between acquisition and use sits *inside* that `try`, never above it. Registrations on process-global state — `Logger` sinks, signal listeners — are torn down in the function's outermost `finally`. `testRunner.runTests` is the worked example: the device session is released by an inner `finally` that the post-preparation abort check sits inside, while sink removal and SIGINT-listener removal sit in the outer `finally` covering every exit path.
+**Why**: A guard above the releasing `try` strands whatever was already acquired — for `runTests`, a prepared device session, meaning emulator/simulator state, driver processes and ports, on the SIGINT-during-preparation path users actually hit. A leaked global registration is worse than a per-call leak because it accumulates across calls in one process: a sink left on the module-level `Logger` by an early exit keeps receiving every later run's entries, including across tests in a single suite run. Neither leak is visible to a green suite, so a phase split MUST come with explicit error- and abort-path tests — happy-path coverage alone lets a stranded resource survive a full-file restructuring unnoticed.
+**Rejected**: (a) one combined cleanup helper invoked from a single `finally` — it forces every resource to share the innermost scope's reachability, so a resource acquired outside that scope goes unreleased on every early exit; (b) repeating the release in a `catch`-and-rethrow at each guard — restates cleanup at every throw site and drifts as throw sites are added.
+*Introduced by*: 260726-gohy-fix-runtests-session-cleanup-leak

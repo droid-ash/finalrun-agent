@@ -140,18 +140,23 @@ export async function runTests(options: TestRunnerOptions): Promise<TestRunnerRe
     }
 
     const goalSession = await prepareRunSession(ctx, checked);
-    if (ctx.runAborted) {
-      throw abortedBeforeExecutionError();
-    }
-
     try {
+      // Inside the try: a session now exists, so an abort that arrived during
+      // preparation must still release it via the finally below.
+      if (ctx.runAborted) {
+        throw abortedBeforeExecutionError();
+      }
       await runTestLoop(ctx, checked, effectiveGoals, goalSession);
       return await finalizeRun(ctx);
     } finally {
-      await cleanupRunResources(ctx, goalSession);
+      await releaseSession(goalSession);
     }
   } finally {
     removeSigintListener();
+    if (ctx.logSink) {
+      Logger.removeSink(ctx.logSink);
+    }
+    Logger.removeSink(ctx.bufferingSink);
   }
 }
 
@@ -495,17 +500,13 @@ async function finalizeRun(ctx: TestRunContext): Promise<TestRunnerResult> {
   };
 }
 
-/** Release the shared device session and restore logger sinks. */
-async function cleanupRunResources(ctx: TestRunContext, goalSession: TestSession): Promise<void> {
+/** Release the shared device session; failures are logged, never propagated. */
+async function releaseSession(goalSession: TestSession): Promise<void> {
   try {
     await goalSession.cleanup();
   } catch (error) {
     Logger.w('Failed to clean up device resources:', error);
   }
-  if (ctx.logSink) {
-    Logger.removeSink(ctx.logSink);
-  }
-  Logger.removeSink(ctx.bufferingSink);
 }
 
 export function selectExecutionPlatform(
