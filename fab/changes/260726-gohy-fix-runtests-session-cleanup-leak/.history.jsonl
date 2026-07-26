@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T02:37:29Z"}
+{"args":"Fix the pre-existing session-cleanup leak in runTests: goalSession created by prepareRunSession is never released when the following abort check throws. Add the missing regression test for abort-after-session-prepare.","cmd":"fab-new","event":"command","ts":"2026-07-26T02:37:29Z"}
