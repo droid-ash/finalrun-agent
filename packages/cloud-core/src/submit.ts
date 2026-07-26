@@ -96,39 +96,45 @@ export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult>
   Logger.i('Preparing cloud run...');
 
   const appMode = resolveAppMode(input);
-  const filesToZip = collectFilesToZip(input);
 
-  // Create zip with only selected files
-  Logger.i(`Zipping ${filesToZip.length} file(s)...`);
-  const zipPath = writeSpecZip(filesToZip);
-
-  // The temp files (the spec zip above, and any temp .app.zip prepared during
-  // app resolution) are acquired before the request, so this finally encloses
-  // everything after acquisition — its scope follows the acquisition, not the
-  // phase split.
+  // Each temp file is released by a finally whose try opens immediately after
+  // its acquisition: the outer scope covers the temp .app.zip that
+  // resolveAppMode may have prepared (so a throw while collecting or zipping
+  // specs cannot orphan it), and the inner scope covers the spec zip written
+  // just above it. The inner finally runs first, so the spec zip is unlinked
+  // before the app zip.
   try {
-    const formData = await buildSubmissionForm(input, appMode, zipPath);
-    const spinnerMessage = buildSpinnerMessage(input, appMode);
-    const uploadStart = Date.now();
-    const { default: ora } = await import('ora');
-    const ctx: SubmissionContext = {
-      input,
-      appMode,
-      spinner: ora(spinnerMessage).start(),
-      uploadStart,
-      elapsed: '',
-    };
+    const filesToZip = collectFilesToZip(input);
 
-    const response = await sendSubmitRequest(ctx, formData);
-    ctx.elapsed = ((Date.now() - ctx.uploadStart) / 1000).toFixed(1);
-    const runId = await parseSubmitResponse(ctx, response);
-    return reportSubmitSuccess(ctx, runId);
-  } finally {
+    // Create zip with only selected files
+    Logger.i(`Zipping ${filesToZip.length} file(s)...`);
+    const zipPath = writeSpecZip(filesToZip);
+
     try {
-      fs.unlinkSync(zipPath);
-    } catch {
-      // ignore cleanup errors
+      const formData = await buildSubmissionForm(input, appMode, zipPath);
+      const spinnerMessage = buildSpinnerMessage(input, appMode);
+      const uploadStart = Date.now();
+      const { default: ora } = await import('ora');
+      const ctx: SubmissionContext = {
+        input,
+        appMode,
+        spinner: ora(spinnerMessage).start(),
+        uploadStart,
+        elapsed: '',
+      };
+
+      const response = await sendSubmitRequest(ctx, formData);
+      ctx.elapsed = ((Date.now() - ctx.uploadStart) / 1000).toFixed(1);
+      const runId = await parseSubmitResponse(ctx, response);
+      return reportSubmitSuccess(ctx, runId);
+    } finally {
+      try {
+        fs.unlinkSync(zipPath);
+      } catch {
+        // ignore cleanup errors
+      }
     }
+  } finally {
     if (appMode.type === 'file' && appMode.prepared.isTempZip) {
       try {
         fs.unlinkSync(appMode.prepared.uploadPath);
@@ -145,7 +151,8 @@ export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult>
 // the binary (platform, simulator-compatibility, packageName) authoritatively
 // after upload, and dropping the inspection step keeps the slim binary lean.
 // For .app directories (iOS simulator builds), prepareAppForUpload zips
-// them on the fly into a temp .app.zip; submitRun's finally cleans that up.
+// them on the fly into a temp .app.zip; submitRun's OUTER finally cleans that
+// up — outer because it must cover spec collection and zipping too.
 function resolveAppMode(input: SubmitRunInput): AppMode {
   if (input.appPath) {
     return { type: 'file', prepared: prepareAppForUpload(input.appPath) };

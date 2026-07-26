@@ -368,6 +368,32 @@ test('submitRun propagates a fetch failure and removes the spec zip and temp app
   assert.deepEqual(tempZipArtifacts(), before, 'failure path must clean up both temp zips');
 });
 
+test('submitRun removes the temp app zip when spec zipping fails before the upload starts', async () => {
+  // Regression test for the pre-upload leak: resolveAppMode acquires a temp
+  // .app.zip, then writeSpecZip throws (AdmZip.addLocalFile on a nonexistent
+  // spec path) BEFORE the cleanup try is entered. The temp app zip must be
+  // released on this path too, not only once the upload phase begins.
+  const before = tempZipArtifacts();
+  const bundlePath = path.join(makeTempDir('appdir'), 'Leaky.app');
+  fs.mkdirSync(bundlePath);
+  fs.writeFileSync(path.join(bundlePath, 'Info.plist'), 'plist');
+  // Deliberately never written: AdmZip.addLocalFile throws on this path.
+  const missingSpec = path.join(makeTempDir('specs'), 'gone.yaml');
+  const stub = installFetchStub(() => okResponse());
+  try {
+    await assert.rejects(
+      submitRun(makeInput({
+        appPath: bundlePath,
+        checked: { tests: [{ sourcePath: missingSpec, relativePath: 'gone.yaml', name: 'Gone' }] },
+      })),
+    );
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.requests.length, 0, 'the throw happens before any request is sent');
+  assert.deepEqual(tempZipArtifacts(), before, 'a pre-upload failure must not orphan the temp app zip');
+});
+
 test('submitRun throws when the server responds 201 but rejects the submission', async () => {
   const body = JSON.stringify({ success: false, error: 'quota exceeded' });
   const stub = installFetchStub(() => new Response(body, { status: 201 }));

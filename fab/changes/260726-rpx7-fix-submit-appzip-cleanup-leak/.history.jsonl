@@ -1,2 +1,9 @@
 {"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T14:18:46Z"}
 {"args":"Fix the pre-existing temp app-zip cleanup leak in cloud-core submitRun: resolveAppMode acquires the zip but the releasing try opens two statements later, so a throw in collectFilesToZip or writeSpecZip leaks it. Add the missing regression test.","cmd":"fab-new","event":"command","ts":"2026-07-26T14:18:46Z"}
+{"delta":"+5.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-26T14:20:41Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-26T14:32:59Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-26T14:34:03Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-26T14:40:00Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-26T14:52:36Z"}
+{"event":"review","result":"passed","ts":"2026-07-26T14:52:36Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-26T14:58:02Z"}
