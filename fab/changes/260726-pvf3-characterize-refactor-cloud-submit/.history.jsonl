@@ -1,2 +1,9 @@
 {"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T06:38:37Z"}
 {"args":"Write characterization tests for cloud-core (currently zero tests), then refactor submitRun (175 lines, complexity\u003e12); swap cloud-core's tolerant test runner for the strict shared runner.","cmd":"fab-new","event":"command","ts":"2026-07-26T06:38:37Z"}
+{"delta":"+5.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-26T06:40:23Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-26T08:45:44Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-26T08:47:22Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-26T09:05:13Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-26T09:18:13Z"}
+{"event":"review","result":"passed","ts":"2026-07-26T09:18:13Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-26T09:23:35Z"}

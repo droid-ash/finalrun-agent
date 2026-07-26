@@ -67,29 +67,97 @@ function parseSubmitTimeoutMs(defaultMs: number): number {
   return parsed;
 }
 
+type AppMode = { type: 'file'; prepared: PreparedApp } | { type: 'server-default' };
+
+interface FileToZip {
+  absolutePath: string;
+  relativePath: string;
+}
+
+/** Minimal projection of the ora spinner used by the submission phases.
+ *  ora is ESM-only and loaded via dynamic import inside submitRun, so a
+ *  structural view avoids a CJS type-import resolution-mode coupling. */
+interface SubmitSpinner {
+  fail(text?: string): void;
+  succeed(text?: string): void;
+}
+
+/** Per-call state shared by the submission phases below. */
+interface SubmissionContext {
+  readonly input: SubmitRunInput;
+  readonly appMode: AppMode;
+  readonly spinner: SubmitSpinner;
+  readonly uploadStart: number;
+  /** Seconds elapsed when the response arrived, formatted; set after the fetch resolves. */
+  elapsed: string;
+}
+
 export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult> {
   Logger.i('Preparing cloud run...');
 
-  // Resolve app — either from --app flag or let the server auto-pick
-  // the latest app_upload for this org + platform at submit time.
-  // Client-side inspection was intentionally removed: the server validates
-  // the binary (platform, simulator-compatibility, packageName) authoritatively
-  // after upload, and dropping the inspection step keeps the slim binary lean.
-  // For .app directories (iOS simulator builds), prepareAppForUpload zips
-  // them on the fly into a temp .app.zip; we clean that up in the finally.
-  let appMode: { type: 'file'; prepared: PreparedApp } | { type: 'server-default' };
+  const appMode = resolveAppMode(input);
+  const filesToZip = collectFilesToZip(input);
 
-  if (input.appPath) {
-    const prepared = prepareAppForUpload(input.appPath);
-    appMode = { type: 'file', prepared };
-  } else {
-    const platformLabel = input.platform?.trim() || 'the run target';
-    console.log(`\n  No --app provided; server will use the latest app uploaded for ${platformLabel}.\n`);
-    appMode = { type: 'server-default' };
+  // Create zip with only selected files
+  Logger.i(`Zipping ${filesToZip.length} file(s)...`);
+  const zipPath = writeSpecZip(filesToZip);
+
+  // The temp files (the spec zip above, and any temp .app.zip prepared during
+  // app resolution) are acquired before the request, so this finally encloses
+  // everything after acquisition — its scope follows the acquisition, not the
+  // phase split.
+  try {
+    const formData = await buildSubmissionForm(input, appMode, zipPath);
+    const spinnerMessage = buildSpinnerMessage(input, appMode);
+    const uploadStart = Date.now();
+    const { default: ora } = await import('ora');
+    const ctx: SubmissionContext = {
+      input,
+      appMode,
+      spinner: ora(spinnerMessage).start(),
+      uploadStart,
+      elapsed: '',
+    };
+
+    const response = await sendSubmitRequest(ctx, formData);
+    ctx.elapsed = ((Date.now() - ctx.uploadStart) / 1000).toFixed(1);
+    const runId = await parseSubmitResponse(ctx, response);
+    return reportSubmitSuccess(ctx, runId);
+  } finally {
+    try {
+      fs.unlinkSync(zipPath);
+    } catch {
+      // ignore cleanup errors
+    }
+    if (appMode.type === 'file' && appMode.prepared.isTempZip) {
+      try {
+        fs.unlinkSync(appMode.prepared.uploadPath);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   }
+}
 
-  // Collect resolved file paths
-  const filesToZip: Array<{ absolutePath: string; relativePath: string }> = [];
+// Resolve app — either from --app flag or let the server auto-pick
+// the latest app_upload for this org + platform at submit time.
+// Client-side inspection was intentionally removed: the server validates
+// the binary (platform, simulator-compatibility, packageName) authoritatively
+// after upload, and dropping the inspection step keeps the slim binary lean.
+// For .app directories (iOS simulator builds), prepareAppForUpload zips
+// them on the fly into a temp .app.zip; submitRun's finally cleans that up.
+function resolveAppMode(input: SubmitRunInput): AppMode {
+  if (input.appPath) {
+    return { type: 'file', prepared: prepareAppForUpload(input.appPath) };
+  }
+  const platformLabel = input.platform?.trim() || 'the run target';
+  console.log(`\n  No --app provided; server will use the latest app uploaded for ${platformLabel}.\n`);
+  return { type: 'server-default' };
+}
+
+// Collect resolved file paths
+function collectFilesToZip(input: SubmitRunInput): FileToZip[] {
+  const filesToZip: FileToZip[] = [];
 
   if (input.checked.suite?.sourcePath && input.checked.suite.relativePath) {
     filesToZip.push({
@@ -137,8 +205,10 @@ export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult>
     }
   }
 
-  // Create zip with only selected files
-  Logger.i(`Zipping ${filesToZip.length} file(s)...`);
+  return filesToZip;
+}
+
+function writeSpecZip(filesToZip: FileToZip[]): string {
   const zip = new AdmZip();
   for (const file of filesToZip) {
     const dir = path.dirname(file.relativePath);
@@ -147,153 +217,157 @@ export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult>
 
   const zipPath = path.join(os.tmpdir(), `finalrun-cloud-${Date.now()}.zip`);
   zip.writeZip(zipPath);
+  return zipPath;
+}
 
-  try {
-    // Display name: suite name for suite runs, test name for single-test runs,
-    // "<first> + N more" for multi-test runs, null otherwise.
-    let runName: string | null = null;
-    if (input.suitePath) {
-      runName = input.checked.suite?.name ?? path.basename(input.suitePath, path.extname(input.suitePath));
-    } else if (input.checked.tests.length === 1) {
-      runName = input.checked.tests[0]?.name ?? null;
-    } else if (input.checked.tests.length > 1) {
-      const first = input.checked.tests[0]?.name ?? path.basename(input.checked.tests[0]?.relativePath ?? '');
-      const remaining = input.checked.tests.length - 1;
-      runName = `${first} + ${remaining} more`;
-    }
-
-    // Run type classification. The server falls back to its own classification
-    // if this field is omitted.
-    const runType: 'single_test' | 'multi_test' | 'suite' = input.suitePath
-      ? 'suite'
-      : input.checked.tests.length === 1
-        ? 'single_test'
-        : 'multi_test';
-
-    const formData = new FormData();
-    const zipBuffer = fs.readFileSync(zipPath);
-    formData.append('file', new Blob([zipBuffer]), 'specs.zip');
-    formData.append('command', input.command);
-    formData.append('selectors', JSON.stringify(input.selectors));
-    formData.append('runType', runType);
-    if (runName) {
-      formData.append('name', runName);
-    }
-    if (input.suitePath) {
-      formData.append('suitePath', input.suitePath);
-    }
-    if (input.envName) {
-      formData.append('envName', input.envName);
-    }
-    if (input.variables && Object.keys(input.variables).length > 0) {
-      formData.append('variables', JSON.stringify(input.variables));
-    }
-    if (input.platform) {
-      formData.append('platform', input.platform);
-    }
-
-    let spinnerMessage: string;
-    const submissionLabel = input.suitePath
-      ? `suite ${path.basename(input.suitePath)} (${input.checked.tests.length} test(s))`
-      : `${input.checked.tests.length} test(s)`;
-
-    if (appMode.type === 'file') {
-      // Stream the file into the multipart body so a large APK/.app.zip isn't
-      // pulled into memory just to wrap as a Blob.
-      const { uploadPath, filename: appFileName, size: appSize } = appMode.prepared;
-      const appBlob = await openAsBlob(uploadPath);
-      formData.append('appFile', appBlob, appFileName);
-      formData.append('appFilename', appFileName);
-
-      spinnerMessage = `Uploading ${appFileName} (${formatBytes(appSize)}) and submitting ${submissionLabel}...`;
-    } else {
-      // server-default: no app fields on the request; server picks latest
-      spinnerMessage = `Submitting ${submissionLabel} (using latest uploaded app)...`;
-    }
-
-    const uploadStart = Date.now();
-    const { default: ora } = await import('ora');
-    const spinner = ora(spinnerMessage).start();
-
-    const url = `${input.cloudUrl}/api/v1/execute`;
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${input.apiKey}` },
-        body: formData,
-        signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
-      });
-    } catch (e) {
-      const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
-      const isTimeout = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-      spinner.fail(
-        isTimeout
-          ? `Upload timed out after ${elapsed}s — connection stalled.`
-          : `Upload failed after ${elapsed}s`,
-      );
-      throw e;
-    }
-
-    const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
-    if (response.status !== 201) {
-      spinner.fail(`Submission failed after ${elapsed}s (HTTP ${response.status})`);
-      const body = await response.text();
-      throw new Error(`Cloud service returned ${response.status}: ${body}`);
-    }
-
-    // Validate response shape before declaring success on the spinner. Wrap
-    // the JSON parse so a malformed/empty body (proxy injecting HTML,
-    // truncated response) fails the spinner instead of leaving it hung.
-    let result: { success: boolean; runId?: string; error?: string };
-    try {
-      result = await response.json() as typeof result;
-    } catch (e) {
-      spinner.fail(`Submission succeeded but server returned an unparseable body`);
-      throw e;
-    }
-    if (!result.success || !result.runId) {
-      spinner.fail(`Submission rejected by server`);
-      throw new Error(
-        `Cloud submission failed: ${result.error ?? JSON.stringify(result)}`,
-      );
-    }
-
-    if (appMode.type === 'file') {
-      spinner.succeed(`Uploaded ${formatBytes(appMode.prepared.size)} in ${elapsed}s`);
-    } else {
-      spinner.succeed(`Submitted in ${elapsed}s`);
-    }
-
-    // Fire-and-forget: print the polling URL and return.
-    const statusUrl = `${input.cloudUrl}/runs/${result.runId}`;
-    console.log(`\n\x1b[32m✓ Run submitted\x1b[0m`);
-    console.log(`  Run ID:      ${result.runId}`);
-    console.log(`  Status URL:  ${statusUrl}`);
-    console.log(`\n  The run is now queued. Use the status URL above to track progress.`);
-
-    let appFilename: string | undefined;
-    if (appMode.type === 'file') {
-      appFilename = appMode.prepared.filename;
-      console.log(`\n  \x1b[33mTip:\x1b[0m You don't need to upload the app every time. Without --app,`);
-      console.log(`       FinalRun uses your latest uploaded app (${appFilename}).`);
-    }
-
-    return { runId: result.runId, statusUrl, appFilename };
-  } finally {
-    try {
-      fs.unlinkSync(zipPath);
-    } catch {
-      // ignore cleanup errors
-    }
-    if (appMode.type === 'file' && appMode.prepared.isTempZip) {
-      try {
-        fs.unlinkSync(appMode.prepared.uploadPath);
-      } catch {
-        // ignore cleanup errors
-      }
-    }
+// Display name: suite name for suite runs, test name for single-test runs,
+// "<first> + N more" for multi-test runs, null otherwise.
+function deriveRunName(input: SubmitRunInput): string | null {
+  if (input.suitePath) {
+    return input.checked.suite?.name ?? path.basename(input.suitePath, path.extname(input.suitePath));
   }
+  if (input.checked.tests.length === 1) {
+    return input.checked.tests[0]?.name ?? null;
+  }
+  if (input.checked.tests.length > 1) {
+    const first = input.checked.tests[0]?.name ?? path.basename(input.checked.tests[0]?.relativePath ?? '');
+    const remaining = input.checked.tests.length - 1;
+    return `${first} + ${remaining} more`;
+  }
+  return null;
+}
+
+// Run type classification. The server falls back to its own classification
+// if this field is omitted.
+function deriveRunType(input: SubmitRunInput): 'single_test' | 'multi_test' | 'suite' {
+  if (input.suitePath) return 'suite';
+  return input.checked.tests.length === 1 ? 'single_test' : 'multi_test';
+}
+
+async function buildSubmissionForm(
+  input: SubmitRunInput,
+  appMode: AppMode,
+  zipPath: string,
+): Promise<FormData> {
+  const formData = new FormData();
+  const zipBuffer = fs.readFileSync(zipPath);
+  formData.append('file', new Blob([zipBuffer]), 'specs.zip');
+  formData.append('command', input.command);
+  formData.append('selectors', JSON.stringify(input.selectors));
+  formData.append('runType', deriveRunType(input));
+
+  const runName = deriveRunName(input);
+  if (runName) {
+    formData.append('name', runName);
+  }
+  if (input.suitePath) {
+    formData.append('suitePath', input.suitePath);
+  }
+  if (input.envName) {
+    formData.append('envName', input.envName);
+  }
+  if (input.variables && Object.keys(input.variables).length > 0) {
+    formData.append('variables', JSON.stringify(input.variables));
+  }
+  if (input.platform) {
+    formData.append('platform', input.platform);
+  }
+
+  if (appMode.type === 'file') {
+    // Stream the file into the multipart body so a large APK/.app.zip isn't
+    // pulled into memory just to wrap as a Blob.
+    const { uploadPath, filename: appFileName } = appMode.prepared;
+    const appBlob = await openAsBlob(uploadPath);
+    formData.append('appFile', appBlob, appFileName);
+    formData.append('appFilename', appFileName);
+  }
+
+  return formData;
+}
+
+function buildSpinnerMessage(input: SubmitRunInput, appMode: AppMode): string {
+  const submissionLabel = input.suitePath
+    ? `suite ${path.basename(input.suitePath)} (${input.checked.tests.length} test(s))`
+    : `${input.checked.tests.length} test(s)`;
+
+  if (appMode.type === 'file') {
+    const { filename, size } = appMode.prepared;
+    return `Uploading ${filename} (${formatBytes(size)}) and submitting ${submissionLabel}...`;
+  }
+  // server-default: no app fields on the request; server picks latest
+  return `Submitting ${submissionLabel} (using latest uploaded app)...`;
+}
+
+async function sendSubmitRequest(ctx: SubmissionContext, formData: FormData): Promise<Response> {
+  const url = `${ctx.input.cloudUrl}/api/v1/execute`;
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ctx.input.apiKey}` },
+      body: formData,
+      signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
+    });
+  } catch (e) {
+    const elapsed = ((Date.now() - ctx.uploadStart) / 1000).toFixed(1);
+    const isTimeout = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    ctx.spinner.fail(
+      isTimeout
+        ? `Upload timed out after ${elapsed}s — connection stalled.`
+        : `Upload failed after ${elapsed}s`,
+    );
+    throw e;
+  }
+}
+
+async function parseSubmitResponse(ctx: SubmissionContext, response: Response): Promise<string> {
+  if (response.status !== 201) {
+    ctx.spinner.fail(`Submission failed after ${ctx.elapsed}s (HTTP ${response.status})`);
+    const body = await response.text();
+    throw new Error(`Cloud service returned ${response.status}: ${body}`);
+  }
+
+  // Validate response shape before declaring success on the spinner. Wrap
+  // the JSON parse so a malformed/empty body (proxy injecting HTML,
+  // truncated response) fails the spinner instead of leaving it hung.
+  let result: { success: boolean; runId?: string; error?: string };
+  try {
+    result = await response.json() as typeof result;
+  } catch (e) {
+    ctx.spinner.fail(`Submission succeeded but server returned an unparseable body`);
+    throw e;
+  }
+  if (!result.success || !result.runId) {
+    ctx.spinner.fail(`Submission rejected by server`);
+    throw new Error(
+      `Cloud submission failed: ${result.error ?? JSON.stringify(result)}`,
+    );
+  }
+  return result.runId;
+}
+
+function reportSubmitSuccess(ctx: SubmissionContext, runId: string): SubmitRunResult {
+  const { appMode, input } = ctx;
+  if (appMode.type === 'file') {
+    ctx.spinner.succeed(`Uploaded ${formatBytes(appMode.prepared.size)} in ${ctx.elapsed}s`);
+  } else {
+    ctx.spinner.succeed(`Submitted in ${ctx.elapsed}s`);
+  }
+
+  // Fire-and-forget: print the polling URL and return.
+  const statusUrl = `${input.cloudUrl}/runs/${runId}`;
+  console.log(`\n\x1b[32m✓ Run submitted\x1b[0m`);
+  console.log(`  Run ID:      ${runId}`);
+  console.log(`  Status URL:  ${statusUrl}`);
+  console.log(`\n  The run is now queued. Use the status URL above to track progress.`);
+
+  let appFilename: string | undefined;
+  if (appMode.type === 'file') {
+    appFilename = appMode.prepared.filename;
+    console.log(`\n  \x1b[33mTip:\x1b[0m You don't need to upload the app every time. Without --app,`);
+    console.log(`       FinalRun uses your latest uploaded app (${appFilename}).`);
+  }
+
+  return { runId, statusUrl, appFilename };
 }
 
 export function formatBytes(bytes: number): string {

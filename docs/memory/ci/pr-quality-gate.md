@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are cleared by extracting phases behind a phase-outcome union with per-call local state and `finally` blocks scoped to each resource's acquisition."
+description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; four code-quality principles are ESLint warnings; tests run through explicit-discovery runner scripts because the pinned Node 20.19 has no `node --test` glob expansion; oversized functions are pinned by characterization tests, then cleared by extracting phases behind a phase-outcome union with per-call local state and `finally` blocks scoped to each resource's acquisition."
 ---
 # PR Quality Gate (ci)
 
@@ -36,16 +36,16 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 ### Requirement: Tests run through explicit-discovery runner scripts
 Every workspace `test` script MUST discover test files by explicit recursive walk (never a `node --test`/`tsx --test` glob), because the pinned Node 20.19 does not expand globs and a directory positional (`node --test dist/`) silently resolves to one bogus passing entry on Node ≥21. Two runner shapes exist:
 
-- **Strict** — `scripts/run-node-tests.mjs`, shared by `packages/common`, `packages/device-node`, and `packages/goal-executor` (packages with real tests), invoked as `node ../../scripts/run-node-tests.mjs` (npm sets cwd to the workspace dir; it discovers `dist/**/*.test.js` under `process.cwd()`). Finding **zero** test files exits **1** — for these packages that is a build/packaging fault, never a silent pass. Missing `dist/` exits 1 with a build hint; signal deaths propagate as `128 + signo`.
-- **Tolerant** — `packages/cloud-core/scripts/runTests.mjs` and `packages/report-web/scripts/runTests.mjs`, for packages with **zero** test files today. They exit **0** with a "no tests yet" notice when — and only when — no test files exist, and propagate the runner's real exit code once tests are present (no blanket `|| true`). `cloud-core` additionally exits 1 if test *sources* exist under `src/` but no compiled tests are found under `dist/` (an unbuilt tree must not masquerade as "no tests"). `report-web` discovers `src/**/*.test.ts` and runs them via `node --import tsx --test`.
+- **Strict** — `scripts/run-node-tests.mjs`, shared by `packages/common`, `packages/cloud-core`, `packages/device-node`, and `packages/goal-executor` (packages with real tests), invoked as `node ../../scripts/run-node-tests.mjs` (npm sets cwd to the workspace dir; it discovers `dist/**/*.test.js` under `process.cwd()`). Finding **zero** test files exits **1** — for these packages that is a build/packaging fault, never a silent pass. Missing `dist/` exits 1 with a build hint; signal deaths propagate as `128 + signo`.
+- **Tolerant** — `packages/report-web/scripts/runTests.mjs`, for the one package with **zero** test files today. It exits **0** with a "no tests yet" notice when — and only when — no test files exist, and propagates the runner's real exit code once tests are present (no blanket `|| true`). `report-web` discovers `src/**/*.test.ts` and runs them via `node --import tsx --test`.
 
 `packages/cli/scripts/runTests.mjs` is the original strict runner (zero files → exit 1) this pattern is modeled on.
 
 #### Scenario: zero-test package under the pinned Node
-- **GIVEN** `packages/cloud-core` is built and has no `dist/**/*.test.js`
+- **GIVEN** `packages/report-web` has no `src/**/*.test.ts`
 - **WHEN** its `test` script runs
 - **THEN** it prints a "no tests yet" notice and exits 0, keeping the gate green
-- **GIVEN** a failing compiled test exists under `dist/`
+- **GIVEN** a failing test file exists under `src/`
 - **WHEN** the script runs
 - **THEN** it propagates the runner's real non-zero exit code
 
@@ -76,9 +76,9 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 *Introduced by*: 260724-gl51-ci-gate-lint-enforcement
 
 ### Separate strict and tolerant runners
-**Decision**: One shared **strict** runner (`scripts/run-node-tests.mjs`, zero files → exit 1) for packages with real tests; per-package **tolerant** runners (zero files → exit 0) for the two packages that have no tests yet.
-**Why**: The gate must be green *and honest* — green for a package that legitimately has no tests yet, red for a package whose real tests failed or failed to compile. A single policy cannot express both; the exit-code inversion is the distinguishing signal. One shared strict copy avoids duplicating the script into three packages.
-**Rejected**: (a) a blanket `|| true` — swallows genuine test failures too; (b) copying the runner into each package — 3× duplication of a ~70-line script in a change that exists to enforce DRY.
+**Decision**: One shared **strict** runner (`scripts/run-node-tests.mjs`, zero files → exit 1) for packages with real tests; a per-package **tolerant** runner (zero files → exit 0) for a package with no tests yet — today only `report-web`. A package graduates to the shared strict runner (and its tolerant script is deleted) as soon as it gains real tests, making "zero test files" a hard error again.
+**Why**: The gate must be green *and honest* — green for a package that legitimately has no tests yet, red for a package whose real tests failed or failed to compile. A single policy cannot express both; the exit-code inversion is the distinguishing signal. One shared strict copy avoids duplicating the script into its consuming packages.
+**Rejected**: (a) a blanket `|| true` — swallows genuine test failures too; (b) copying the strict runner into each consuming package — repeated duplication of a ~70-line script in a change that exists to enforce DRY.
 *Introduced by*: 260724-gl51-ci-gate-lint-enforcement
 
 ### Phase helpers return a phase-outcome union; the loop stays in the orchestrator
@@ -98,3 +98,15 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 **Why**: A guard above the releasing `try` strands whatever was already acquired — for `runTests`, a prepared device session, meaning emulator/simulator state, driver processes and ports, on the SIGINT-during-preparation path users actually hit. A leaked global registration is worse than a per-call leak because it accumulates across calls in one process: a sink left on the module-level `Logger` by an early exit keeps receiving every later run's entries, including across tests in a single suite run. Neither leak is visible to a green suite, so a phase split MUST come with explicit error- and abort-path tests — happy-path coverage alone lets a stranded resource survive a full-file restructuring unnoticed.
 **Rejected**: (a) one combined cleanup helper invoked from a single `finally` — it forces every resource to share the innermost scope's reachability, so a resource acquired outside that scope goes unreleased on every early exit; (b) repeating the release in a `catch`-and-rethrow at each guard — restates cleanup at every throw site and drifts as throw sites are added.
 *Introduced by*: 260726-gohy-fix-runtests-session-cleanup-leak
+
+### Characterization tests pin an untested function before it is restructured
+**Decision**: An untested oversized function is made safe to split by first writing tests that pass GREEN against the **unmodified** source, then refactoring and re-running them byte-for-byte unchanged. The "green before" claim is verified explicitly — restore the pre-refactor source with the new test file kept, rebuild, watch it pass — and the suite is then mutation-checked, corrupting one pinned behavior at a time so that each corruption fails exactly the test that pins it. `submitRun` (`packages/cloud-core/src/submit.ts`) is the worked example — `submit.test.ts` goes green against the pre-split function and survives its extraction into module-private phase helpers unmodified. This is the route for the remaining untested oversized functions: `cli/src/sessionRunner.ts` and `cli/src/reportWriter.ts`.
+**Why**: This is the inverse sequence from a bug fix, whose regression test MUST fail before the fix and pass after. A characterization test that fails before the refactor is describing behavior that does not exist, and one that only passes afterwards has stopped pinning anything — so the before-run is the whole proof, not a formality. Because such a suite is green on both sides by construction, "still green after the refactor" is also exactly the signal a suite that constrains nothing produces; mutation is what separates the two, and it matters most on the contracts a reader cannot re-derive from the result — request shape, secrets exclusion, temp-file cleanup on both the success and failure paths.
+**Rejected**: (a) refactoring first and writing tests against the result — they then pin whatever the refactor produced, including anything it silently dropped; (b) treating a passing test count as the coverage bar — a number invites padding with tests that assert nothing load-bearing.
+*Introduced by*: 260726-pvf3-characterize-refactor-cloud-submit
+
+### Characterize around the absent seam, and record what it cannot reach
+**Decision**: A package with no dependency-injection seam is characterized by stubbing only the process globals it genuinely crosses — `globalThis.fetch`, `console.log`, each restored in a `finally` — and using real temp workspaces (`fs.mkdtempSync`) for every filesystem effect, so the actual zip, upload-blob and cleanup paths execute. No seam is added to make the code reachable. Behavior that stays unreachable under that constraint is recorded as an open gap rather than forced: in `cloud-core` the spinner strings behind `submitRun`'s dynamic `await import('ora')` are unpinned for exactly this reason.
+**Why**: The constitution's Test Integrity principle forbids reshaping implementation to suit test infrastructure, and a seam introduced during a characterization pass additionally destroys the equivalence proof — the tests would be pinning a function that no longer has the shape they were written against. The rule is not "no seams": `packages/cli/src/testRunner.ts` carries a deliberate `testRunnerDependencies` object. It is that a seam is a design change, so it belongs to a change that argues for it, never to one whose claim is that nothing changed.
+**Rejected**: (a) exporting internals — a timeout parser, the temp-artifact paths — so tests can reach them: the same reshaping in a thinner disguise. The module-load `FINALRUN_SUBMIT_TIMEOUT_MS` throw is reached instead by dropping the require-cache entry and re-requiring (the package compiles to CommonJS, so a query-suffixed dynamic import resolves to the cached module and never re-evaluates), and the temp artifacts by diffing `os.tmpdir()` on their stable `finalrun-(cloud|app)-*.zip` prefixes. (b) Leaving an unreachable behavior silently uncovered — an unrecorded gap reads as coverage.
+*Introduced by*: 260726-pvf3-characterize-refactor-cloud-submit
