@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 6
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-26T02:57:43Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T03:09:10Z"}
     review: {started_at: "2026-07-26T03:09:10Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T03:18:10Z"}
     hydrate: {started_at: "2026-07-26T03:18:10Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T03:22:09Z"}
-    ship: {started_at: "2026-07-26T03:22:09Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-26T03:22:09Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T03:25:02Z"}
+    review-pr: {started_at: "2026-07-26T03:25:02Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/155
 change_type_source: explicit
 true_impact:
-    added: 390
-    deleted: 3
-    net: 387
+    added: 899
+    deleted: 16
+    net: 883
     tests:
-        added: 0
+        added: 122
         deleted: 0
-        net: 0
-    computed_at: "2026-07-26T03:22:09Z"
-    computed_at_stage: hydrate
+        net: 122
+    computed_at: "2026-07-26T03:25:02Z"
+    computed_at_stage: ship
 summary: Recorded the finally-scope-follows-acquisition convention in ci/pr-quality-gate.md; no memory documented the old leaking cleanup behavior
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-26T03:22:09Z
+last_updated: 2026-07-26T03:25:02Z
