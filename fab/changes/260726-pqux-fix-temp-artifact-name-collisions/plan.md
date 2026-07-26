@@ -72,6 +72,23 @@ The fix is additive to two filenames only. #157's cleanup structure MUST be unto
 - [x] T001 Add two concurrency regression tests to `packages/cloud-core/src/test/submit.test.ts`: (a) two concurrent `submitRun` calls with distinct spec fixtures and `Date.now` stubbed to a constant assert two distinct `finalrun-cloud-*` temp names coexist in-flight; (b) two concurrent `.app`-directory submissions assert two distinct `finalrun-app-*` temp names coexist in-flight; both assert `tempZipArtifacts()` returns to its pre-test snapshot afterwards. `Date.now` restored in a `finally`. <!-- R3 -->
 - [x] T002 Build and run the cloud-core suite against the UNFIXED source; confirm both new tests FAIL (one shared name in-flight) and record the exact failure output. <!-- R3 -->
 
+  **Evidence.** Command: `npm run build --workspace=@finalrun/cloud-core && npm run test --workspace=@finalrun/cloud-core`, with the two new tests present and `submit.ts` / `appBundle.ts` still at their unfixed state. Observed — `ℹ tests 18 / pass 16 / fail 2`, npm exit **1**:
+
+  ```text
+  ✖ two concurrent submissions sharing a millisecond get distinct spec-zip temp names, both cleaned up
+    AssertionError [ERR_ASSERTION]: two distinct in-flight spec-zip names must coexist,
+      saw: ["finalrun-cloud-1753500000000.zip"]
+    1 !== 2
+  ✖ two concurrent .app submissions sharing a millisecond get distinct app-zip temp names, both cleaned up
+    AssertionError [ERR_ASSERTION]: two distinct in-flight app-zip names must coexist,
+      saw: ["finalrun-app-1753500000000.zip"]
+    1 !== 2
+  ```
+
+  A single name where two were expected is the collision itself: with `Date.now` frozen, both submissions derived the same path. All 16 pre-existing tests stayed green, so the failure is attributable to the new assertions and not to the harness.
+
+  **Independently reproduced at review.** Reverting *only* `packages/cloud-core/src/submit.ts` and `packages/cloud-core/src/appBundle.ts` to `origin/main` while keeping the new test file, then rebuilding cloud-core, reproduced exactly the two failures above (`tests 18, pass 16, fail 2`, exit 1); restoring both sources returned 18/18 with the working tree byte-identical.
+
 ### Phase 2: Fix
 
 - [x] T003 In `packages/cloud-core/src/submit.ts` (`writeSpecZip`, ~line 225): change the temp name to `finalrun-cloud-${Date.now()}-${randomUUID()}.zip`; add the `node:crypto` import. Touch nothing else in the file. <!-- R1 -->
@@ -97,7 +114,7 @@ The fix is additive to two filenames only. #157's cleanup structure MUST be unto
 
 - [x] A-004 R1: With identical timestamps, two concurrent spec submissions produce two distinct in-flight `finalrun-cloud-*` names (asserted inside the fetch stub, before cleanup)
 - [x] A-005 R2: With identical timestamps, two concurrent `.app` submissions produce two distinct in-flight `finalrun-app-*` names
-- [x] A-006 R3: Both new tests were confirmed to FAIL against the unfixed source, with the failure output recorded
+- [x] A-006 R3: Both new tests were confirmed to FAIL against the unfixed source (`tests 18 / pass 16 / fail 2`, exit 1; `saw: ["finalrun-cloud-1753500000000.zip"]` and `saw: ["finalrun-app-1753500000000.zip"]`, `1 !== 2`), with the command and full output recorded under T002 and independently reproduced at review by reverting only the two source files
 
 ### Scenario Coverage
 
