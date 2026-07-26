@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T15:19:28Z"}
+{"args":"Fix cross-run temp-artifact collisions: finalrun-cloud-/finalrun-app-${Date.now()}.zip use millisecond resolution with no random component, so two concurrent submissions can share a path and one can unlink the other's in-flight upload. Add regression coverage for path uniqueness.","cmd":"fab-new","event":"command","ts":"2026-07-26T15:19:28Z"}

@@ -1,0 +1,29 @@
+id: pqux
+name: 260726-pqux-fix-temp-artifact-name-collisions
+created: 2026-07-26T15:19:28Z
+created_by: ashish-noon
+change_type: feat
+issues: []
+progress:
+    intake: active
+    apply: pending
+    review: pending
+    hydrate: pending
+    ship: pending
+    review-pr: pending
+plan:
+    generated: false
+    task_count: 0
+    acceptance_count: 0
+    acceptance_completed: 0
+confidence:
+    certain: 0
+    confident: 0
+    tentative: 0
+    unresolved: 0
+    score: 0.0
+stage_metrics:
+    intake: {started_at: "2026-07-26T15:19:28Z", driver: fab-new, iterations: 1}
+prs: []
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-26T15:19:28Z
