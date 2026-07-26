@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 6
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-26T14:32:59Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:40:00Z"}
     review: {started_at: "2026-07-26T14:40:00Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:52:36Z"}
     hydrate: {started_at: "2026-07-26T14:52:36Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T14:58:02Z"}
-    ship: {started_at: "2026-07-26T14:58:02Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-26T14:58:02Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-26T15:01:24Z"}
+    review-pr: {started_at: "2026-07-26T15:01:24Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/157
 change_type_source: explicit
 true_impact:
-    added: 32
-    deleted: 0
-    net: 32
+    added: 475
+    deleted: 34
+    net: 441
     tests:
-        added: 0
+        added: 26
         deleted: 0
-        net: 0
-    computed_at: "2026-07-26T14:58:02Z"
-    computed_at_stage: hydrate
+        net: 26
+    computed_at: "2026-07-26T15:01:24Z"
+    computed_at_stage: ship
 summary: Scope each temp-file finally to its own acquisition in cloud-core submitRun so a pre-upload throw cannot orphan the temp .app.zip
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-26T14:58:02Z
+last_updated: 2026-07-26T15:01:24Z
