@@ -186,9 +186,11 @@ test('submitRun forwards the documented non-secret variables map verbatim and ne
   const form = stub.requests[0].form;
   // Full enumeration, not just the variables value: an extra field carrying a
   // secret would otherwise slip past the leak scan below if it were non-string.
+  // No `platform` here: makeInput leaves it unset and the form appends the
+  // field only when input.platform is truthy.
   assert.deepEqual(
     [...form.keys()].sort(),
-    ['command', 'file', 'name', 'platform', 'runType', 'selectors', 'variables'],
+    ['command', 'file', 'name', 'runType', 'selectors', 'variables'],
   );
   assert.equal(form.get('variables'), JSON.stringify({ APP_ENV: 'staging', USERNAME: 'demo' }));
   for (const [key, value] of form.entries()) {
