@@ -184,6 +184,12 @@ test('submitRun forwards the documented non-secret variables map verbatim and ne
   }
 
   const form = stub.requests[0].form;
+  // Full enumeration, not just the variables value: an extra field carrying a
+  // secret would otherwise slip past the leak scan below if it were non-string.
+  assert.deepEqual(
+    [...form.keys()].sort(),
+    ['command', 'file', 'name', 'platform', 'runType', 'selectors', 'variables'],
+  );
   assert.equal(form.get('variables'), JSON.stringify({ APP_ENV: 'staging', USERNAME: 'demo' }));
   for (const [key, value] of form.entries()) {
     if (typeof value === 'string') {
@@ -397,6 +403,13 @@ test('the module throws at load time when FINALRUN_SUBMIT_TIMEOUT_MS is invalid'
     }
     process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = '60000';
     assert.doesNotThrow(reload, 'a valid override must be accepted');
+    // Characterization, not endorsement: the guard is `!Number.isFinite(n) || n <= 0`,
+    // so a fractional value is ACCEPTED even though the error text promises
+    // "a positive integer". Pinned here so the mismatch is visible and cannot
+    // change unnoticed; reconciling message and parser is a behaviour change,
+    // recorded as follow-up in this change's plan.md.
+    process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = '1.5';
+    assert.doesNotThrow(reload, 'fractional values are accepted by the current parser');
   } finally {
     if (original === undefined) {
       delete process.env['FINALRUN_SUBMIT_TIMEOUT_MS'];

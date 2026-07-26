@@ -10,7 +10,7 @@
 #### R1: Characterization tests pass against the unmodified implementation
 A new `packages/cloud-core/src/submit.test.ts` SHALL pin `submitRun`'s current behavior and
 MUST pass GREEN against the unmodified `submit.ts` before any refactoring begins. The tests
-MUST stub ONLY `globalThis.fetch` (restored in `finally`) and use REAL temp workspaces
+MUST stub `globalThis.fetch` as the only external-I/O stub (restored in `finally`) and use REAL temp workspaces. Narrow interception of a process-global *output* channel (`console.log`, restored in `finally`) is permitted where it is the only way to pin a user-visible string
 (`fs.mkdtempSync`) for all filesystem behavior. No dependency-injection seam SHALL be added
 to `submit.ts` (constitution Test Integrity principle).
 
@@ -294,6 +294,30 @@ cache; (c) a child-process probe — slower and format-coupled via `__dirname` a
   secrets beyond the documented non-secret `variables` map are not forwarded
 
 ## Notes
+
+### Deferred to follow-up changes (raised in CodeRabbit review of PR #156)
+
+**1. Temp app-zip cleanup window in `submitRun` — pre-existing, needs its own `fix:` change.**
+`resolveAppMode` acquires a temp `.app.zip` (via `prepareAppForUpload`), but the `try` whose
+`finally` deletes it opens two statements later, after `collectFilesToZip` and `writeSpecZip`. If
+either throws, that zip leaks. Both CodeRabbit and the pipeline review flagged it, and both agreed
+it is **pre-existing, not introduced here**: on `origin/main` the same acquisition sits at `:83`
+while the cleanup `try` opens at `:151`. Closing it changes cleanup semantics on an error path,
+which this change cannot do while claiming the refactor is behaviour-preserving.
+
+This is the identical situation to PR #154 → #155: a latent leak found during a
+zero-behaviour-change refactor, deferred, then fixed properly in its own change with a regression
+test. Follow the same route. The fix: open the `try` immediately after `resolveAppMode` returns, so
+every subsequent statement is inside cleanup coverage — and add a regression test for
+"`writeSpecZip` throws after an app zip was prepared", which has no coverage today.
+
+**2. `FINALRUN_SUBMIT_TIMEOUT_MS` message/parser mismatch.**
+The guard is `!Number.isFinite(parsed) || parsed <= 0`, so `1.5` is **accepted**, yet the error text
+promises "a positive integer (milliseconds)". `submit.test.ts` now pins the actual behaviour
+(fractional accepted) with a comment marking it as characterization rather than endorsement, so the
+mismatch is visible and cannot drift unnoticed. Reconciling the two — either rejecting non-integers
+or rewording the message — is a behaviour/contract change and belongs in its own change.
+
 
 ### Partially closed at review: user-visible output strings
 

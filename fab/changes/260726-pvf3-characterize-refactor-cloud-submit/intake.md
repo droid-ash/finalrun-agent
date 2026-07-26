@@ -67,7 +67,7 @@ dependency-injection seam**. `submitRun`'s side effects are reached directly:
 | `:59` | `process.env['FINALRUN_SUBMIT_TIMEOUT_MS']` | Set/restore around the test |
 
 **Prefer real filesystem behavior over mocks** — temp workspaces via `fs.mkdtempSync`, as the `cli`
-tests already do. Stub only `globalThis.fetch`, the one boundary that must not be crossed. Do **not**
+tests already do. `globalThis.fetch` is the only external-I/O boundary that may be stubbed. Narrow interception of a process-global *output* channel (`console.log`, restored in `finally`) is also permitted, since pinning a user-visible string has no other reach. Do **not**
 introduce a DI seam into `submit.ts` to make testing easier: that is a design change, and the
 constitution's Test Integrity principle forbids reshaping implementation to suit test infrastructure.
 
@@ -167,7 +167,7 @@ case.
 | 1 | Certain | Target `cloud-core/submit.ts` before `sessionRunner.ts` / `reportWriter.ts` | Smallest (304 lines, 1 oversized fn), self-contained, and the only one that also closes a zero-coverage package and enables the strict-runner swap | S:85 R:85 A:90 D:85 |
 | 2 | Certain | Characterization tests are written and passing BEFORE any refactoring | The function is currently unverified; restructuring first would leave nothing to prove equivalence against | S:95 R:80 A:95 D:95 |
 | 3 | Certain | These tests must PASS both before and after — unlike #155's regression tests, which had to FAIL first | They pin existing behavior rather than prove a bug; verify this explicitly rather than assuming | S:90 R:85 A:95 D:95 |
-| 4 | Certain | Stub only `globalThis.fetch`; use real temp dirs for all filesystem behavior | The network is the one boundary that must not be crossed; real fs exercises the genuine zip/cleanup logic and matches existing `cli` test style | S:85 R:80 A:90 D:85 |
+| 4 | Certain | `globalThis.fetch` is the only external-I/O stub; real temp dirs for all filesystem behavior; narrow `console.log` interception permitted to pin user-visible output | The network is the one boundary that must not be crossed; real fs exercises the genuine zip/cleanup logic and matches existing `cli` test style | S:85 R:80 A:90 D:85 |
 | 5 | Confident | No fixed test count; the bar is covering app modes, request shape, secrets exclusion, config/env branches, error paths, and cleanup | A number would invite gaming; the listed behaviors are what make the tests load-bearing for the refactor | S:70 R:80 A:85 D:75 |
 | 6 | Certain | Do NOT add a DI seam to `cloud-core` to ease testing | Reshaping implementation to suit test infrastructure is prohibited by the constitution's Test Integrity principle; the fetch stub + temp dirs suffice | S:85 R:75 A:95 D:90 |
 | 7 | Certain | Swap `cloud-core` to the strict runner and delete its tolerant script; `report-web` keeps its own | Once real tests exist, "zero test files" should be a hard error again; report-web still has none | S:90 R:85 A:95 D:95 |
