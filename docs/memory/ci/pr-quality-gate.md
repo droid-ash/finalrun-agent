@@ -41,6 +41,16 @@ Every workspace `test` script MUST discover test files by explicit recursive wal
 
 `packages/cli/scripts/runTests.mjs` is the original strict runner (zero files → exit 1) this pattern is modeled on.
 
+### Requirement: Test files live in a `test/` directory beside the code they cover
+A `*.test.ts` file MUST sit in a `test/` subdirectory of the directory holding its subject, at every level of the tree — `src/apiKey.ts` is covered by `src/test/apiKey.test.ts`, and `src/device/android/AndroidDevice.ts` by `src/device/android/test/AndroidDevice.test.ts`. Tests are never co-located as siblings of their subject.
+
+This costs nothing at the tooling layer and requires no runner change: every runner discovers by **recursive** walk (see above), so a nested `test/` directory is found wherever it appears; the `include: ["src/**/*"]` in each package `tsconfig.json` compiles it, so `dist/` mirrors the layout; and ESLint's `packages/*/src` glob still covers it. The one real cost is import depth — a test is one level deeper than its subject, so it reaches it as `../subject.js` rather than `./subject.js`, and any `__dirname`-relative path inside a test needs the extra level too.
+
+#### Scenario: a test is added for a nested module
+- **GIVEN** a new source file at `src/infra/android/Foo.ts`
+- **WHEN** a test is written for it
+- **THEN** it is placed at `src/infra/android/test/Foo.test.ts` and imports its subject as `../Foo.js`, with no runner or config change required
+
 #### Scenario: zero-test package under the pinned Node
 - **GIVEN** `packages/report-web` has no `src/**/*.test.ts`
 - **WHEN** its `test` script runs

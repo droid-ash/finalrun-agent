@@ -8,7 +8,7 @@
 ### Testing: Characterization tests for `submitRun`
 
 #### R1: Characterization tests pass against the unmodified implementation
-A new `packages/cloud-core/src/submit.test.ts` SHALL pin `submitRun`'s current behavior and
+A new `packages/cloud-core/src/test/submit.test.ts` SHALL pin `submitRun`'s current behavior and
 MUST pass GREEN against the unmodified `submit.ts` before any refactoring begins. The tests
 MUST stub `globalThis.fetch` as the only external-I/O stub (restored in `finally`) and use REAL temp workspaces. Narrow interception of a process-global *output* channel (`console.log`, restored in `finally`) is permitted where it is the only way to pin a user-visible string
 (`fs.mkdtempSync`) for all filesystem behavior. No dependency-injection seam SHALL be added
@@ -184,7 +184,7 @@ cache; (c) a child-process probe — slower and format-coupled via `__dirname` a
 
 ### Phase 2: Characterization tests (against UNMODIFIED submit.ts)
 
-- [x] T002 Create `packages/cloud-core/src/submit.test.ts` with shared harness helpers:
+- [x] T002 Create `packages/cloud-core/src/test/submit.test.ts` with shared harness helpers:
   fetch stub capture (restore in `finally`), temp workspace builder, spec-file builder,
   input builder, 201-success `Response` builder, tmpdir zip-artifact snapshot <!-- R1 -->
 - [x] T003 Request-shape + secrets tests: URL/method/Authorization header, exact form-field
@@ -237,7 +237,7 @@ cache; (c) a child-process probe — slower and format-coupled via `__dirname` a
 
 ### Functional Completeness
 
-- [x] A-001 R1: `packages/cloud-core/src/submit.test.ts` exists, stubs only `globalThis.fetch`
+- [x] A-001 R1: `packages/cloud-core/src/test/submit.test.ts` exists, stubs only `globalThis.fetch`
   (restored in `finally`), uses real `fs.mkdtempSync` workspaces, and passed GREEN against the
   unmodified `submit.ts` before any refactor commit touched it
   *(review-verified: `submit.ts` reverted to `origin/main` with the test file kept → rebuild →

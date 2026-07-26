@@ -50,7 +50,7 @@ verified explicitly, not assumed.
 
 ## What Changes
 
-### 1. Characterization tests for `submitRun` (new `packages/cloud-core/src/submit.test.ts`)
+### 1. Characterization tests for `submitRun` (new `packages/cloud-core/src/test/submit.test.ts`)
 
 **The testability challenge, and the constraint it imposes.** Unlike `packages/cli/src/testRunner.ts`
 — which exposes a `testRunnerDependencies` object tests override — `cloud-core` has **no
@@ -140,7 +140,7 @@ case.
 
 ## Impact
 
-- **Added**: `packages/cloud-core/src/submit.test.ts`.
+- **Added**: `packages/cloud-core/src/test/submit.test.ts`.
 - **Modified**: `packages/cloud-core/src/submit.ts`, `packages/cloud-core/package.json`,
   `docs/memory/ci/pr-quality-gate.md`.
 - **Deleted**: `packages/cloud-core/scripts/runTests.mjs`.
