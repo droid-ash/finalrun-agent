@@ -1,5 +1,6 @@
 # Archive Index
 
+- **260726-fnwt-batch-refactor-goal-executor** — Batched Refactor of `goal-executor` — 19 Warnings in One Change
 - **260726-pqux-fix-temp-artifact-name-collisions** — Make Temp Artifact Names Collision-Resistant
 - **260726-rpx7-fix-submit-appzip-cleanup-leak** — Fix the Temp App-Zip Cleanup Leak in `submitRun`
 - **260726-pvf3-characterize-refactor-cloud-submit** — Characterize and Refactor `cloud-core` — First Tests for a Zero-Coverage Package

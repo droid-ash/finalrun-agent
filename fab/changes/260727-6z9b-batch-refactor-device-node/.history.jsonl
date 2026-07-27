@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-27T03:34:34Z"}
+{"args":"Batched refactor of device-node: split 18 oversized/complex functions across the 8 tested source files, clearing 23 warnings, using the package's 61 relevant tests plus differential harnesses as the safety net. Excludes the 4 untested files (6 warnings).","cmd":"fab-new","event":"command","ts":"2026-07-27T03:34:34Z"}
