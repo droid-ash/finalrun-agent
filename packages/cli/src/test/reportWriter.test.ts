@@ -40,7 +40,7 @@ function createWriter(runDir: string, bindings: RuntimeBindings = createBindings
   });
 }
 
-function createEnvironment(workspaceRoot: string, envPath?: string) {
+function createEnvironment(envPath?: string) {
   return {
     envName: 'staging',
     envPath,
@@ -175,10 +175,7 @@ async function arrangeRunInputs(runDir: string): Promise<void> {
   await writer.init();
   await writer.writeRunInputs({
     workspaceRoot,
-    environment: createEnvironment(
-      workspaceRoot,
-      path.join(workspaceRoot, '.finalrun', 'env', 'staging.yaml'),
-    ),
+    environment: createEnvironment(path.join(workspaceRoot, '.finalrun', 'env', 'staging.yaml')),
     tests: [createSourcedTestDef(sourcedPath), createInlineTestDef()],
     suite: {
       suiteId: 'smoke',
@@ -306,7 +303,7 @@ test('writeRunInputs pins the sourceless suite and the out-of-workspace display 
     await writer.init();
     await writer.writeRunInputs({
       workspaceRoot,
-      environment: createEnvironment(workspaceRoot),
+      environment: createEnvironment(),
       tests: [outsideTest],
       suite: { suiteId: 'adhoc', name: 'adhoc suite', tests: ['ext.yaml'] },
       effectiveGoals: new Map(),
@@ -627,7 +624,7 @@ async function arrangePassingFinalize(runDir: string) {
   await writer.init();
   await writer.writeRunInputs({
     workspaceRoot,
-    environment: createEnvironment(workspaceRoot),
+    environment: createEnvironment(),
     tests: [testDef],
     effectiveGoals: new Map([[testDef.testId!, 'Effective goal for login.']]),
     ...createRunContext(),
@@ -1143,10 +1140,7 @@ async function runSweepLifecycle(
   await writer.init();
   await writer.writeRunInputs({
     workspaceRoot,
-    environment: createEnvironment(
-      workspaceRoot,
-      path.join(workspaceRoot, '.finalrun', 'env', 'staging.yaml'),
-    ),
+    environment: createEnvironment(path.join(workspaceRoot, '.finalrun', 'env', 'staging.yaml')),
     tests: [testDef, failedDef],
     effectiveGoals: new Map([[testDef.testId!, 'Enter ${secrets.token}.']]),
     ...createRunContext(),

@@ -260,6 +260,34 @@ warnings and an achievable suite on the table for no principled reason.
 
 ## Notes
 
+### Deferred from CodeRabbit review of PR #161 — both pre-existing
+
+Two source findings, both **verified pre-existing** against `origin/main` and both behaviour changes,
+so both are deferred rather than folded into a characterization-and-refactor change.
+
+**1. `sessionRunner.ts` — derive platform from `deviceInfo.getPlatform()` instead of the inline
+literal.** `origin/main:223` already reads `deviceInfo.isAndroid ? PLATFORM_ANDROID : 'ios'`; the
+refactor carried it verbatim into the extracted helper. `getPlatform()` is the single source of
+truth backed by `PLATFORM_ANDROID`/`PLATFORM_IOS`, so the literal is a duplicate — a real DRY point.
+Swapping them is only safe if `getPlatform()` is provably equivalent for every device state,
+including any that is neither Android nor iOS, which the ternary silently maps to `'ios'`. That
+equivalence needs checking, and if it does not hold the swap is a behaviour change on device
+detection. The same finding notes the `?.` in `params.selectedEntry?.deviceInfo` is dead
+(`origin/main:218` has it too) — safe to drop, but not worth a source edit on its own.
+
+**2. `sessionRunner.ts` — replace the `adbPath!` assertion with an explicit guard.**
+`origin/main:237` already uses `adbPath!`. `AdbPath` is `string | null`, so when `getADBPath()`
+resolves to `null` the assertion forwards `null` into `installAndroidApp` rather than failing with a
+diagnosable message — unlike the adjacent `deviceInfo.id` check, which does guard. CodeRabbit is
+right that a guard is better. It is nonetheless a behaviour change on an error path: today a null
+adb path produces whatever `installAndroidApp` does with `null`; with a guard it throws a clear
+error earlier. That belongs in its own `fix:` change with a test for the null-adb path, which has no
+coverage today.
+
+Both are good suggestions on code this change only relocated. Folding either into a PR whose claim
+is behaviour preservation would undercut the equivalence the characterization suite exists to prove.
+
+
 - Check items as you review: `- [x]`
 - All acceptance items must pass before `/fab-continue` (hydrate)
 
