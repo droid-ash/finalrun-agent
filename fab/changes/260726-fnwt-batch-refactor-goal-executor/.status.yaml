@@ -1,0 +1,36 @@
+id: fnwt
+name: 260726-fnwt-batch-refactor-goal-executor
+created: 2026-07-26T16:09:41Z
+created_by: ashish-noon
+change_type: refactor
+issues: []
+progress:
+    intake: ready
+    apply: pending
+    review: pending
+    hydrate: pending
+    ship: pending
+    review-pr: pending
+plan:
+    generated: false
+    task_count: 0
+    acceptance_count: 0
+    acceptance_completed: 0
+confidence:
+    certain: 9
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 4.9
+    fuzzy: true
+    dimensions:
+        signal: 85.5
+        reversibility: 81.0
+        competence: 89.0
+        disambiguation: 86.0
+stage_metrics:
+    intake: {started_at: "2026-07-26T16:09:41Z", driver: fab-new, iterations: 1}
+prs: []
+change_type_source: explicit
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-26T16:11:15Z
