@@ -84,86 +84,16 @@ export class Device implements DeviceAgent {
       this._runtime.setShouldEnsureStability(request.shouldEnsureStability);
       const action = request.action;
 
-      switch (action.type) {
-        case DeviceAction.TAP:
-          return await this._runtime.tap(action as TapAction);
-
-        case DeviceAction.TAP_PERCENT:
-          return await this._runtime.tapPercent(action as TapPercentAction);
-
-        case DeviceAction.LONG_PRESS:
-          return await this._runtime.longPress(action as LongPressAction);
-
-        case DeviceAction.ENTER_TEXT:
-          return await this._runtime.enterText(action as EnterTextAction);
-
-        case DeviceAction.ERASE_TEXT:
-          return await this._runtime.eraseText(action as EraseTextAction);
-
-        case DeviceAction.SCROLL_ABS:
-          return await this._runtime.scrollAbs(action as ScrollAbsAction);
-
-        case DeviceAction.BACK:
-          return await this._runtime.back(action as BackAction);
-
-        case DeviceAction.HOME:
-          return await this._runtime.home(action as HomeAction);
-
-        case DeviceAction.ROTATE:
-          return await this._runtime.rotate(action as RotateAction);
-
-        case DeviceAction.HIDE_KEYBOARD:
-          return await this._runtime.hideKeyboard(action as HideKeyboardAction);
-
-        case DeviceAction.PRESS_KEY:
-          return await this._runtime.pressKey(action as PressKeyAction);
-
-        case DeviceAction.LAUNCH_APP:
-          return await this._runtime.launchApp(action as LaunchAppAction);
-
-        case DeviceAction.KILL_APP:
-          return await this._runtime.killApp(action as KillAppAction);
-
-        case DeviceAction.DEEPLINK: {
-          const deeplinkAction = action as DeeplinkAction;
-          Logger.d(`Executing deeplink action: ${deeplinkAction.deeplink}`);
-          return await this._runtime.openDeepLink(deeplinkAction);
-        }
-
-        case DeviceAction.SET_LOCATION:
-          return await this._runtime.setLocation(action as SetLocationAction);
-
-        case DeviceAction.SWITCH_TO_PRIMARY_APP:
-          return await this._runtime.switchToPrimaryApp(
-            action as SwitchToPrimaryAppAction,
-          );
-
-        case DeviceAction.CHECK_APP_IN_FOREGROUND:
-          return await this._runtime.checkAppInForeground(
-            action as CheckAppInForegroundAction,
-          );
-
-        case DeviceAction.GET_SCREENSHOT_AND_HIERARCHY:
-          return await this._runtime.captureState(request.traceStep);
-
-        case DeviceAction.GET_SCREENSHOT:
-          return await this._runtime.getScreenshot(action as GetScreenshotAction);
-
-        case DeviceAction.GET_HIERARCHY:
-          return await this._runtime.getHierarchy(action as GetHierarchyAction);
-
-        case DeviceAction.GET_APP_LIST:
-          return await this._runtime.getInstalledAppsResponse();
-
-        case DeviceAction.WAIT:
-          return new DeviceNodeResponse({ success: true });
-
-        default:
-          return new DeviceNodeResponse({
-            success: false,
-            message: `Unsupported action type: ${action.type}`,
-          });
-      }
+      return (
+        (await this._executeGestureAction(action)) ??
+        (await this._executeNavigationAction(action)) ??
+        (await this._executeAppAction(action)) ??
+        (await this._executeCaptureAction(request, action)) ??
+        new DeviceNodeResponse({
+          success: false,
+          message: `Unsupported action type: ${action.type}`,
+        })
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       Logger.e(`Action execution failed: ${message}`);
@@ -171,6 +101,120 @@ export class Device implements DeviceAgent {
         success: false,
         message: `Action failed: ${message}`,
       });
+    }
+  }
+
+  /** Gesture and text-input actions; null when the action is not in this category. */
+  private async _executeGestureAction(
+    action: DeviceActionRequest['action'],
+  ): Promise<DeviceNodeResponse | null> {
+    switch (action.type) {
+      case DeviceAction.TAP:
+        return await this._runtime.tap(action as TapAction);
+
+      case DeviceAction.TAP_PERCENT:
+        return await this._runtime.tapPercent(action as TapPercentAction);
+
+      case DeviceAction.LONG_PRESS:
+        return await this._runtime.longPress(action as LongPressAction);
+
+      case DeviceAction.ENTER_TEXT:
+        return await this._runtime.enterText(action as EnterTextAction);
+
+      case DeviceAction.ERASE_TEXT:
+        return await this._runtime.eraseText(action as EraseTextAction);
+
+      case DeviceAction.SCROLL_ABS:
+        return await this._runtime.scrollAbs(action as ScrollAbsAction);
+
+      default:
+        return null;
+    }
+  }
+
+  /** Navigation and key actions; null when the action is not in this category. */
+  private async _executeNavigationAction(
+    action: DeviceActionRequest['action'],
+  ): Promise<DeviceNodeResponse | null> {
+    switch (action.type) {
+      case DeviceAction.BACK:
+        return await this._runtime.back(action as BackAction);
+
+      case DeviceAction.HOME:
+        return await this._runtime.home(action as HomeAction);
+
+      case DeviceAction.ROTATE:
+        return await this._runtime.rotate(action as RotateAction);
+
+      case DeviceAction.HIDE_KEYBOARD:
+        return await this._runtime.hideKeyboard(action as HideKeyboardAction);
+
+      case DeviceAction.PRESS_KEY:
+        return await this._runtime.pressKey(action as PressKeyAction);
+
+      default:
+        return null;
+    }
+  }
+
+  /** App lifecycle and device-state actions; null when the action is not in this category. */
+  private async _executeAppAction(
+    action: DeviceActionRequest['action'],
+  ): Promise<DeviceNodeResponse | null> {
+    switch (action.type) {
+      case DeviceAction.LAUNCH_APP:
+        return await this._runtime.launchApp(action as LaunchAppAction);
+
+      case DeviceAction.KILL_APP:
+        return await this._runtime.killApp(action as KillAppAction);
+
+      case DeviceAction.DEEPLINK: {
+        const deeplinkAction = action as DeeplinkAction;
+        Logger.d(`Executing deeplink action: ${deeplinkAction.deeplink}`);
+        return await this._runtime.openDeepLink(deeplinkAction);
+      }
+
+      case DeviceAction.SET_LOCATION:
+        return await this._runtime.setLocation(action as SetLocationAction);
+
+      case DeviceAction.SWITCH_TO_PRIMARY_APP:
+        return await this._runtime.switchToPrimaryApp(
+          action as SwitchToPrimaryAppAction,
+        );
+
+      case DeviceAction.CHECK_APP_IN_FOREGROUND:
+        return await this._runtime.checkAppInForeground(
+          action as CheckAppInForegroundAction,
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  /** Capture and query actions; null when the action is not in this category. */
+  private async _executeCaptureAction(
+    request: DeviceActionRequest,
+    action: DeviceActionRequest['action'],
+  ): Promise<DeviceNodeResponse | null> {
+    switch (action.type) {
+      case DeviceAction.GET_SCREENSHOT_AND_HIERARCHY:
+        return await this._runtime.captureState(request.traceStep);
+
+      case DeviceAction.GET_SCREENSHOT:
+        return await this._runtime.getScreenshot(action as GetScreenshotAction);
+
+      case DeviceAction.GET_HIERARCHY:
+        return await this._runtime.getHierarchy(action as GetHierarchyAction);
+
+      case DeviceAction.GET_APP_LIST:
+        return await this._runtime.getInstalledAppsResponse();
+
+      case DeviceAction.WAIT:
+        return new DeviceNodeResponse({ success: true });
+
+      default:
+        return null;
     }
   }
 

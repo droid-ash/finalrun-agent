@@ -19,5 +19,5 @@ fkf_version: "0.1"
 |--------|-------------|
 | [ci](ci/index.md) | PR quality gate (`npm ci` → build → test → lint), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor |
 | [cli](cli/index.md) | CLI orchestration, report writing, HTML generation |
-| [device-node](device-node/index.md) | Device interaction via gRPC: lifecycle, recording, log capture |
+| [device-node](device-node/index.md) | Device interaction via gRPC: lifecycle, recording, log capture, and the Android/iOS mirror — what the two platform branches share and what stays per-platform |
 | [report-web](report-web/index.md) | Next.js report viewer for test run results |

@@ -185,19 +185,8 @@ export class GrpcDriverSetup {
     grpcClient.createChannel(host, port);
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const startupFailure = options?.getStartupFailureMessage?.();
-      if (startupFailure) {
-        throw new Error(startupFailure);
-      }
-
-      if (attempt > 0 && attempt % 20 === 0) {
-        const waitStatus = options?.getWaitStatusMessage?.();
-        Logger.i(
-          waitStatus
-            ? `Still waiting for driver... (${(attempt * 500) / 1000}s) ${waitStatus}`
-            : `Still waiting for driver... (${(attempt * 500) / 1000}s)`,
-        );
-      }
+      this._throwIfStartupFailed(options);
+      this._logWaitProgress(attempt, options);
 
       try {
         const connected = await grpcClient.ping();
@@ -211,10 +200,7 @@ export class GrpcDriverSetup {
         // Ping failures are expected while the driver is still starting.
       }
 
-      const postAttemptFailure = options?.getStartupFailureMessage?.();
-      if (postAttemptFailure) {
-        throw new Error(postAttemptFailure);
-      }
+      this._throwIfStartupFailed(options);
 
       await this._delayFn(delayMs);
     }
@@ -226,6 +212,31 @@ export class GrpcDriverSetup {
 
     Logger.e('Failed to connect after 120s (driver did not start)');
     return false;
+  }
+
+  /** Throw when the platform setup has recorded a fatal driver-startup failure. */
+  private _throwIfStartupFailed(options?: {
+    getStartupFailureMessage?: () => string | null;
+  }): void {
+    const startupFailure = options?.getStartupFailureMessage?.();
+    if (startupFailure) {
+      throw new Error(startupFailure);
+    }
+  }
+
+  /** Every 20 polls, log that the driver is still being waited on (with any status detail). */
+  private _logWaitProgress(
+    attempt: number,
+    options?: { getWaitStatusMessage?: () => string | null },
+  ): void {
+    if (attempt > 0 && attempt % 20 === 0) {
+      const waitStatus = options?.getWaitStatusMessage?.();
+      Logger.i(
+        waitStatus
+          ? `Still waiting for driver... (${(attempt * 500) / 1000}s) ${waitStatus}`
+          : `Still waiting for driver... (${(attempt * 500) / 1000}s)`,
+      );
+    }
   }
 
   private _startAndroidDriver(

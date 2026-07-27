@@ -6,6 +6,7 @@ import {
   Logger,
   type SingleArgument,
 } from '@finalrun/common';
+import { toCommandFailureResult } from '../commandFailure.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -719,40 +720,7 @@ export class AdbClient {
           : Number.NaN;
 
     if (Number.isFinite(parsedApiLevel) && parsedApiLevel < 29) {
-      const stateResult = await this._runAdb(
-        adbPath,
-        [
-          '-s',
-          deviceSerial,
-          'shell',
-          'settings',
-          'put',
-          'global',
-          'airplane_mode_on',
-          enabled ? '1' : '0',
-        ],
-        `Failed to set airplane mode state on ${deviceSerial}`,
-      );
-      if (!stateResult.success) {
-        return stateResult;
-      }
-
-      return await this._runAdb(
-        adbPath,
-        [
-          '-s',
-          deviceSerial,
-          'shell',
-          'am',
-          'broadcast',
-          '-a',
-          'android.intent.action.AIRPLANE_MODE',
-          '--ez',
-          'state',
-          enabled ? 'true' : 'false',
-        ],
-        `Failed to broadcast airplane mode change on ${deviceSerial}`,
-      );
+      return await this._toggleAirplaneModeLegacy(adbPath, deviceSerial, enabled);
     }
 
     return await this._runAdb(
@@ -767,6 +735,48 @@ export class AdbClient {
         enabled ? 'enable' : 'disable',
       ],
       `Failed to toggle airplane mode on ${deviceSerial}`,
+    );
+  }
+
+  /** Pre-API-29 fallback: write the global setting, then broadcast the change. */
+  private async _toggleAirplaneModeLegacy(
+    adbPath: string,
+    deviceSerial: string,
+    enabled: boolean,
+  ): Promise<AndroidCommandResult> {
+    const stateResult = await this._runAdb(
+      adbPath,
+      [
+        '-s',
+        deviceSerial,
+        'shell',
+        'settings',
+        'put',
+        'global',
+        'airplane_mode_on',
+        enabled ? '1' : '0',
+      ],
+      `Failed to set airplane mode state on ${deviceSerial}`,
+    );
+    if (!stateResult.success) {
+      return stateResult;
+    }
+
+    return await this._runAdb(
+      adbPath,
+      [
+        '-s',
+        deviceSerial,
+        'shell',
+        'am',
+        'broadcast',
+        '-a',
+        'android.intent.action.AIRPLANE_MODE',
+        '--ez',
+        'state',
+        enabled ? 'true' : 'false',
+      ],
+      `Failed to broadcast airplane mode change on ${deviceSerial}`,
     );
   }
 
@@ -838,76 +848,93 @@ export class AdbClient {
     packageName: string,
     permissions: Record<string, string>,
   ): Promise<AndroidCommandResult> {
-    const errors: string[] = [];
-    let skippedUndeclaredRuntime = 0;
+    const outcome = { errors: [] as string[], skippedUndeclaredRuntime: 0 };
 
     for (const [permissionName, action] of Object.entries(permissions)) {
       const translatedPermissions = this._translatePermissionName(permissionName);
       if (translatedPermissions.length === 0) {
-        errors.push(`Unknown permission: ${permissionName}`);
+        outcome.errors.push(`Unknown permission: ${permissionName}`);
         continue;
       }
 
       for (const androidPermission of translatedPermissions) {
-        if (androidPermission === 'SYSTEM_ALERT_WINDOW') {
-          const result = await this._toggleSystemAlertWindowPermission(
-            adbPath,
-            deviceSerial,
-            packageName,
-            action,
-          );
-          if (!result.success) {
-            errors.push(
-              `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
-            );
-          }
-          continue;
-        }
-
-        const adbAction = action === 'allow' ? 'grant' : 'revoke';
-        const failurePrefix = `Failed to ${adbAction} ${androidPermission} on ${deviceSerial}`;
-        const result = await this._runAdb(
-          adbPath,
-          [
-            '-s',
-            deviceSerial,
-            'shell',
-            'pm',
-            adbAction,
-            packageName,
-            androidPermission,
-          ],
-          failurePrefix,
-          { suppressErrorLog: true },
-        );
-        if (result.success) {
-          continue;
-        }
-        const textForMatch = `${result.stderr ?? ''}\n${result.message ?? ''}`;
-        if (isUndeclaredPermissionGrantFailure(textForMatch)) {
-          skippedUndeclaredRuntime += 1;
-          continue;
-        }
-        Logger.e(failurePrefix, new Error(result.message ?? 'unknown error'));
-        errors.push(
-          `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
+        await this._applyAndroidPermission(
+          { adbPath, deviceSerial, packageName },
+          androidPermission,
+          action,
+          outcome,
         );
       }
     }
 
-    if (skippedUndeclaredRuntime > 0) {
+    if (outcome.skippedUndeclaredRuntime > 0) {
       Logger.i(
-        `Skipped ${skippedUndeclaredRuntime} Android runtime permission(s) not declared by ${packageName} on ${deviceSerial}`,
+        `Skipped ${outcome.skippedUndeclaredRuntime} Android runtime permission(s) not declared by ${packageName} on ${deviceSerial}`,
       );
     }
 
     return {
-      success: errors.length === 0,
+      success: outcome.errors.length === 0,
       message:
-        errors.length === 0
+        outcome.errors.length === 0
           ? 'Permissions updated successfully'
-          : errors.join('\n'),
+          : outcome.errors.join('\n'),
     };
+  }
+
+  /**
+   * Apply one translated Android permission, recording failures and
+   * undeclared-permission skips on the caller's per-call outcome context.
+   */
+  private async _applyAndroidPermission(
+    target: { adbPath: string; deviceSerial: string; packageName: string },
+    androidPermission: string,
+    action: string,
+    outcome: { errors: string[]; skippedUndeclaredRuntime: number },
+  ): Promise<void> {
+    if (androidPermission === 'SYSTEM_ALERT_WINDOW') {
+      const result = await this._toggleSystemAlertWindowPermission(
+        target.adbPath,
+        target.deviceSerial,
+        target.packageName,
+        action,
+      );
+      if (!result.success) {
+        outcome.errors.push(
+          `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
+        );
+      }
+      return;
+    }
+
+    const adbAction = action === 'allow' ? 'grant' : 'revoke';
+    const failurePrefix = `Failed to ${adbAction} ${androidPermission} on ${target.deviceSerial}`;
+    const result = await this._runAdb(
+      target.adbPath,
+      [
+        '-s',
+        target.deviceSerial,
+        'shell',
+        'pm',
+        adbAction,
+        target.packageName,
+        androidPermission,
+      ],
+      failurePrefix,
+      { suppressErrorLog: true },
+    );
+    if (result.success) {
+      return;
+    }
+    const textForMatch = `${result.stderr ?? ''}\n${result.message ?? ''}`;
+    if (isUndeclaredPermissionGrantFailure(textForMatch)) {
+      outcome.skippedUndeclaredRuntime += 1;
+      return;
+    }
+    Logger.e(failurePrefix, new Error(result.message ?? 'unknown error'));
+    outcome.errors.push(
+      `Failed to update ${androidPermission}: ${result.message ?? 'unknown error'}`,
+    );
   }
 
   async toggleDisableBatteryOptimization(
@@ -1047,42 +1074,12 @@ export class AdbClient {
         stderr: stderrText,
       };
     } catch (error) {
-      const result = this._toFailureResult(failurePrefix, error);
+      const result = toCommandFailureResult(failurePrefix, error);
       if (!options?.suppressErrorLog) {
         Logger.e(failurePrefix, error);
       }
       return result;
     }
-  }
-
-  private _toFailureResult(
-    failurePrefix: string,
-    error: unknown,
-  ): AndroidCommandResult {
-    const stdout =
-      typeof error === 'object' &&
-      error !== null &&
-      'stdout' in error &&
-      (typeof (error as { stdout?: unknown }).stdout === 'string' ||
-        Buffer.isBuffer((error as { stdout?: unknown }).stdout))
-        ? (error as { stdout?: string | Buffer }).stdout?.toString().trim()
-        : '';
-    const stderr =
-      typeof error === 'object' &&
-      error !== null &&
-      'stderr' in error &&
-      (typeof (error as { stderr?: unknown }).stderr === 'string' ||
-        Buffer.isBuffer((error as { stderr?: unknown }).stderr))
-        ? (error as { stderr?: string | Buffer }).stderr?.toString().trim()
-        : '';
-    const errorMessage = stderr || stdout || (error instanceof Error ? error.message : String(error));
-
-    return {
-      success: false,
-      message: `${failurePrefix}: ${errorMessage}`,
-      stdout,
-      stderr,
-    };
   }
 
   private _normalizeKeyName(key: string): string {
