@@ -7,4 +7,5 @@ description: "CLI orchestration, report writing, HTML generation"
 
 | File | Description |
 |------|-------------|
-| [report-writer](report-writer.md) | ReportWriter artifact handling including device log copy and redaction |
+| [report-writer](report-writer.md) | ReportWriter (packages/cli/src/reportWriter.ts) — the run directory it emits (runner.log, input/, tests/<id>/, summary.json, run.json), the secret-redaction contract every write path crosses, device-log copy-then-redact, first-failure precedence, and the emitted-JSON key-omission contract that makes an absent optional field part of the schema |
+| [session-runner](session-runner.md) | sessionRunner.ts — prepareTestSession/executeTestOnSession/runGoal: the per-call ExecutionSessionState every phase records its acquisition into, the single finally that releases whatever is still held, the recording and device-log capture lifecycles, and the CLI's two sanctioned dependency seams (TestSessionDeps and testRunnerDependencies) |

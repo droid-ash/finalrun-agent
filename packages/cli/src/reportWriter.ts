@@ -44,6 +44,20 @@ interface TestSnapshotState {
   effectiveGoal: string;
 }
 
+interface WriteRunInputsParams {
+  workspaceRoot: string;
+  environment: LoadedEnvironmentConfig;
+  tests: TestDefinition[];
+  suite?: SuiteDefinition;
+  effectiveGoals: Map<string, string>;
+  target: RunTarget;
+  cli: { command: string; selectors: string[]; debug: boolean; [key: string]: unknown };
+  model: { provider: string; modelName: string; label: string };
+  reasoning?: ReasoningLevel;
+  features?: FeatureOverrides;
+  app: RunManifestAppRecord;
+}
+
 export class ReportWriter {
   private static readonly _FAILURE_PLACEHOLDER_IMAGE = Buffer.from(
     '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBAQEA8QDw8PDw8PDw8PDw8QDxAQFREWFhURFRUYHSggGBolGxUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGxAQGy0fICUtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAgMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQID/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEAMQAAAB5A//xAAXEAEBAQEAAAAAAAAAAAAAAAABABEh/9oACAEBAAEFAm3H/8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAwEBPwGn/8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAgEBPwGn/9k=',
@@ -153,23 +167,26 @@ export class ReportWriter {
     this._runTarget = params.target ?? { type: 'direct' };
   }
 
-  async writeRunInputs(params: {
-    workspaceRoot: string;
-    environment: LoadedEnvironmentConfig;
-    tests: TestDefinition[];
-    suite?: SuiteDefinition;
-    effectiveGoals: Map<string, string>;
-    target: RunTarget;
-    cli: { command: string; selectors: string[]; debug: boolean; [key: string]: unknown };
-    model: { provider: string; modelName: string; label: string };
-    reasoning?: ReasoningLevel;
-    features?: FeatureOverrides;
-    app: RunManifestAppRecord;
-  }): Promise<void> {
+  async writeRunInputs(params: WriteRunInputsParams): Promise<void> {
     const inputDir = path.join(this._runDir, 'input');
     const testSnapshotDir = path.join(inputDir, 'tests');
     await fsp.mkdir(testSnapshotDir, { recursive: true });
 
+    await this._writeRunContextInput(params);
+    await this._writeEnvironmentInput(params);
+    await this._writeSuiteInput(params);
+    await this._writeTestInputs(params);
+  }
+
+  private async _writeJson(relativePath: string, value: unknown): Promise<void> {
+    await fsp.writeFile(
+      path.join(this._runDir, relativePath),
+      JSON.stringify(value, null, 2),
+      'utf-8',
+    );
+  }
+
+  private async _writeRunContextInput(params: WriteRunInputsParams): Promise<void> {
     this.setRunContext({
       cli: params.cli,
       model: params.model,
@@ -177,23 +194,17 @@ export class ReportWriter {
       target: params.target,
     });
     this._runContextJsonPath = path.posix.join('input', 'run-context.json');
-    await fsp.writeFile(
-      path.join(this._runDir, this._runContextJsonPath),
-      JSON.stringify(
-        {
-          cli: params.cli,
-          model: params.model,
-          ...(params.reasoning !== undefined ? { reasoning: params.reasoning } : {}),
-          ...(params.features !== undefined ? { features: params.features } : {}),
-          app: params.app,
-          target: params.target,
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
+    await this._writeJson(this._runContextJsonPath, {
+      cli: params.cli,
+      model: params.model,
+      ...(params.reasoning !== undefined ? { reasoning: params.reasoning } : {}),
+      ...(params.features !== undefined ? { features: params.features } : {}),
+      app: params.app,
+      target: params.target,
+    });
+  }
 
+  private async _writeEnvironmentInput(params: WriteRunInputsParams): Promise<void> {
     const envSnapshotYamlPath = path.posix.join('input', 'env.snapshot.yaml');
     const envSnapshotJsonPath = path.posix.join('input', 'env.json');
     const workspaceEnvPath = params.environment.envPath
@@ -217,42 +228,39 @@ export class ReportWriter {
       }),
       'utf-8',
     );
-    await fsp.writeFile(
-      path.join(this._runDir, envSnapshotJsonPath),
-      JSON.stringify(this._inputEnvironment, null, 2),
-      'utf-8',
-    );
+    await this._writeJson(envSnapshotJsonPath, this._inputEnvironment);
+  }
 
+  private async _writeSuiteInput(params: WriteRunInputsParams): Promise<void> {
     this._inputSuite = undefined;
-    if (params.suite) {
-      const suiteSnapshotYamlPath = path.posix.join('input', 'suite.snapshot.yaml');
-      const suiteSnapshotJsonPath = path.posix.join('input', 'suite.json');
-      const suiteRecord: SuiteDefinition = {
-        suiteId: params.suite.suiteId,
-        name: params.suite.name,
-        description: params.suite.description,
-        workspaceSourcePath: params.suite.sourcePath
-          ? toDisplayPath(params.workspaceRoot, params.suite.sourcePath)
-          : undefined,
-        snapshotYamlPath: params.suite.sourcePath ? suiteSnapshotYamlPath : undefined,
-        snapshotJsonPath: suiteSnapshotJsonPath,
-        tests: params.suite.tests,
-        resolvedTestIds: params.tests.map((test) => test.testId!),
-      };
-      if (params.suite.sourcePath) {
-        await fsp.copyFile(
-          params.suite.sourcePath,
-          path.join(this._runDir, suiteSnapshotYamlPath),
-        );
-      }
-      await fsp.writeFile(
-        path.join(this._runDir, suiteSnapshotJsonPath),
-        JSON.stringify(suiteRecord, null, 2),
-        'utf-8',
-      );
-      this._inputSuite = suiteRecord;
+    if (!params.suite) {
+      return;
     }
+    const suiteSnapshotYamlPath = path.posix.join('input', 'suite.snapshot.yaml');
+    const suiteSnapshotJsonPath = path.posix.join('input', 'suite.json');
+    const suiteRecord: SuiteDefinition = {
+      suiteId: params.suite.suiteId,
+      name: params.suite.name,
+      description: params.suite.description,
+      workspaceSourcePath: params.suite.sourcePath
+        ? toDisplayPath(params.workspaceRoot, params.suite.sourcePath)
+        : undefined,
+      snapshotYamlPath: params.suite.sourcePath ? suiteSnapshotYamlPath : undefined,
+      snapshotJsonPath: suiteSnapshotJsonPath,
+      tests: params.suite.tests,
+      resolvedTestIds: params.tests.map((test) => test.testId!),
+    };
+    if (params.suite.sourcePath) {
+      await fsp.copyFile(
+        params.suite.sourcePath,
+        path.join(this._runDir, suiteSnapshotYamlPath),
+      );
+    }
+    await this._writeJson(suiteSnapshotJsonPath, suiteRecord);
+    this._inputSuite = suiteRecord;
+  }
 
+  private async _writeTestInputs(params: WriteRunInputsParams): Promise<void> {
     const selectedTests: TestDefinition[] = [];
     this._testSnapshots.clear();
     for (const test of params.tests) {
@@ -273,22 +281,14 @@ export class ReportWriter {
       if (test.sourcePath) {
         await fsp.copyFile(test.sourcePath, path.join(this._runDir, snapshotYamlPath));
       }
-      await fsp.writeFile(
-        path.join(this._runDir, snapshotJsonPath),
-        JSON.stringify(
-          {
-            testId: test.testId!,
-            testName: test.name,
-            relativePath: test.relativePath,
-            workspaceSourcePath,
-            bindingReferences,
-            ...authored,
-          },
-          null,
-          2,
-        ),
-        'utf-8',
-      );
+      await this._writeJson(snapshotJsonPath, {
+        testId: test.testId!,
+        testName: test.name,
+        relativePath: test.relativePath,
+        workspaceSourcePath,
+        bindingReferences,
+        ...authored,
+      });
       this._testSnapshots.set(test.testId!, {
         authored,
         bindingReferences,
@@ -320,11 +320,7 @@ export class ReportWriter {
     result: TestExecutionResult,
     bindings: RuntimeBindings,
   ): Promise<TestResult> {
-    const testDir = path.join(this._runDir, 'tests', test.testId!);
-    const stepDir = path.join(testDir, 'actions');
-    const screenshotDir = path.join(testDir, 'screenshots');
-    await fsp.mkdir(stepDir, { recursive: true });
-    await fsp.mkdir(screenshotDir, { recursive: true });
+    await this._ensureTestArtifactDirs(test.testId!);
 
     const recordingRelative = await this._copyRecordingArtifact(test.testId!, result.recording);
     const recordingStartedAt = result.recording?.startedAt;
@@ -334,13 +330,54 @@ export class ReportWriter {
     const deviceLogStartedAt = result.deviceLog?.startedAt;
     const deviceLogCompletedAt = result.deviceLog?.completedAt;
 
+    const steps = await this._writeStepArtifacts(test.testId!, result, bindings, recordingStartedAt);
+
+    const testRecord: TestResult = {
+      testId: test.testId!,
+      testName: test.name,
+      sourcePath: test.sourcePath ?? '',
+      relativePath: test.relativePath ?? '',
+      success: result.success,
+      status: resolveTestStatus(result),
+      message: redactResolvedValue(result.message, bindings) ?? result.message,
+      analysis: redactResolvedValue(result.analysis, bindings),
+      platform: result.platform,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      durationMs: durationMsBetween(result.startedAt, result.completedAt),
+      recordingFile: recordingRelative,
+      recordingStartedAt,
+      recordingCompletedAt,
+      deviceLogFile: deviceLogRelative,
+      deviceLogStartedAt,
+      deviceLogCompletedAt,
+      steps,
+    };
+
+    await this._writeJson(path.posix.join('tests', test.testId!, 'result.json'), testRecord);
+
+    return testRecord;
+  }
+
+  private async _ensureTestArtifactDirs(testId: string): Promise<void> {
+    const testDir = path.join(this._runDir, 'tests', testId);
+    await fsp.mkdir(path.join(testDir, 'actions'), { recursive: true });
+    await fsp.mkdir(path.join(testDir, 'screenshots'), { recursive: true });
+  }
+
+  private async _writeStepArtifacts(
+    testId: string,
+    result: TestExecutionResult,
+    bindings: RuntimeBindings,
+    recordingStartedAt: string | undefined,
+  ): Promise<AgentAction[]> {
     const steps: AgentAction[] = [];
     for (const [index, step] of result.steps.entries()) {
       const stepNumber = index + 1;
       const stepFileBase = `${String(stepNumber).padStart(3, '0')}`;
-      const stepJsonRelative = path.posix.join('tests', test.testId!, 'actions', `${stepFileBase}.json`);
+      const stepJsonRelative = path.posix.join('tests', testId, 'actions', `${stepFileBase}.json`);
       const screenshotRelative = step.screenshot
-        ? path.posix.join('tests', test.testId!, 'screenshots', `${stepFileBase}.jpg`)
+        ? path.posix.join('tests', testId, 'screenshots', `${stepFileBase}.jpg`)
         : undefined;
 
       if (step.screenshot && screenshotRelative) {
@@ -356,45 +393,9 @@ export class ReportWriter {
         stepJsonFile: stepJsonRelative,
       });
       steps.push(artifactStep);
-      await fsp.writeFile(
-        path.join(this._runDir, stepJsonRelative),
-        JSON.stringify(artifactStep, null, 2),
-        'utf-8',
-      );
+      await this._writeJson(stepJsonRelative, artifactStep);
     }
-
-    const testRecord: TestResult = {
-      testId: test.testId!,
-      testName: test.name,
-      sourcePath: test.sourcePath ?? '',
-      relativePath: test.relativePath ?? '',
-      success: result.success,
-      status: resolveTestStatus(result),
-      message: redactResolvedValue(result.message, bindings) ?? result.message,
-      analysis: redactResolvedValue(result.analysis, bindings),
-      platform: result.platform,
-      startedAt: result.startedAt,
-      completedAt: result.completedAt,
-      durationMs: Math.max(
-        0,
-        new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime(),
-      ),
-      recordingFile: recordingRelative,
-      recordingStartedAt,
-      recordingCompletedAt,
-      deviceLogFile: deviceLogRelative,
-      deviceLogStartedAt,
-      deviceLogCompletedAt,
-      steps,
-    };
-
-    await fsp.writeFile(
-      path.join(testDir, 'result.json'),
-      JSON.stringify(testRecord, null, 2),
-      'utf-8',
-    );
-
-    return testRecord;
+    return steps;
   }
 
   async finalize(params: {
@@ -406,19 +407,41 @@ export class ReportWriter {
     failurePhase?: FailurePhase;
     diagnosticsSummary?: string;
   }): Promise<RunSummary> {
+    const summary = this._buildRunSummary(params);
+    const manifest = this._buildRunManifest({
+      startedAt: params.startedAt,
+      completedAt: params.completedAt,
+      tests: params.tests,
+      success: summary.success,
+      status: summary.status,
+      failurePhase: params.failurePhase,
+      diagnosticsSummary: params.diagnosticsSummary,
+    });
+
+    await this._writeJson('summary.json', summary);
+    await this._writeJson('run.json', manifest);
+
+    return summary;
+  }
+
+  private _buildRunSummary(params: {
+    startedAt: string;
+    completedAt: string;
+    tests: TestResult[];
+    successOverride?: boolean;
+    statusOverride?: RunStatus;
+    failurePhase?: FailurePhase;
+  }): RunSummary {
     const passedCount = params.tests.filter((test) => test.success).length;
     const failedCount = params.tests.length - passedCount;
     const stepCount = params.tests.reduce((total, test) => total + test.steps.length, 0);
-    const summary: RunSummary = {
+    return {
       runId: this._runId,
       envName: this._envName,
       platform: this._platform,
       startedAt: params.startedAt,
       completedAt: params.completedAt,
-      durationMs: Math.max(
-        0,
-        new Date(params.completedAt).getTime() - new Date(params.startedAt).getTime(),
-      ),
+      durationMs: durationMsBetween(params.startedAt, params.completedAt),
       success: params.successOverride ?? failedCount === 0,
       status: params.statusOverride ?? ((params.successOverride ?? failedCount === 0) ? 'success' : 'failure'),
       failurePhase: params.failurePhase,
@@ -439,28 +462,6 @@ export class ReportWriter {
       })),
       runJsonFile: 'run.json',
     };
-    const manifest = this._buildRunManifest({
-      startedAt: params.startedAt,
-      completedAt: params.completedAt,
-      tests: params.tests,
-      success: summary.success,
-      status: summary.status,
-      failurePhase: params.failurePhase,
-      diagnosticsSummary: params.diagnosticsSummary,
-    });
-
-    await fsp.writeFile(
-      path.join(this._runDir, 'summary.json'),
-      JSON.stringify(summary, null, 2),
-      'utf-8',
-    );
-    await fsp.writeFile(
-      path.join(this._runDir, 'run.json'),
-      JSON.stringify(manifest, null, 2),
-      'utf-8',
-    );
-
-    return summary;
   }
 
   async writeTestFailureRecord(params: {
@@ -471,12 +472,7 @@ export class ReportWriter {
     startedAt: string;
     completedAt: string;
   }): Promise<TestResult> {
-    const testDir = path.join(this._runDir, 'tests', params.test.testId!);
-    const stepDir = path.join(testDir, 'actions');
-    const screenshotDir = path.join(testDir, 'screenshots');
-    await fsp.mkdir(testDir, { recursive: true });
-    await fsp.mkdir(stepDir, { recursive: true });
-    await fsp.mkdir(screenshotDir, { recursive: true });
+    await this._ensureTestArtifactDirs(params.test.testId!);
 
     const stepJsonRelative = path.posix.join('tests', params.test.testId!, 'actions', '001.json');
     const screenshotRelative = path.posix.join(
@@ -487,45 +483,19 @@ export class ReportWriter {
     );
     const failureMessage =
       redactResolvedValue(params.message, params.bindings) ?? params.message;
-    const failureStep: AgentAction = {
-      stepNumber: 1,
-      iteration: 1,
-      actionType: 'run_failure',
-      naturalLanguageAction: 'Run setup failed before the first recorded agent action.',
-      reason: failureMessage,
-      analysis: 'No executable agent step completed before the run failed.',
-      success: false,
-      status: 'failure',
-      errorMessage: failureMessage,
-      durationMs: Math.max(
-        0,
-        new Date(params.completedAt).getTime() - new Date(params.startedAt).getTime(),
-      ),
-      timestamp: params.completedAt,
-      screenshotFile: screenshotRelative,
-      stepJsonFile: stepJsonRelative,
-      trace: {
-        step: 1,
-        action: 'run_failure',
-        status: 'failure',
-        totalMs: Math.max(
-          0,
-          new Date(params.completedAt).getTime() - new Date(params.startedAt).getTime(),
-        ),
-        spans: [],
-        failureReason: failureMessage,
-      },
-    };
+    const failureStep = buildRunFailureStep({
+      failureMessage,
+      startedAt: params.startedAt,
+      completedAt: params.completedAt,
+      screenshotRelative,
+      stepJsonRelative,
+    });
 
     await fsp.writeFile(
       path.join(this._runDir, screenshotRelative),
       ReportWriter._FAILURE_PLACEHOLDER_IMAGE,
     );
-    await fsp.writeFile(
-      path.join(this._runDir, stepJsonRelative),
-      JSON.stringify(failureStep, null, 2),
-      'utf-8',
-    );
+    await this._writeJson(stepJsonRelative, failureStep);
 
     const testRecord: TestResult = {
       testId: params.test.testId!,
@@ -539,18 +509,11 @@ export class ReportWriter {
       platform: params.platform,
       startedAt: params.startedAt,
       completedAt: params.completedAt,
-      durationMs: Math.max(
-        0,
-        new Date(params.completedAt).getTime() - new Date(params.startedAt).getTime(),
-      ),
+      durationMs: durationMsBetween(params.startedAt, params.completedAt),
       steps: [failureStep],
     };
 
-    await fsp.writeFile(
-      path.join(testDir, 'result.json'),
-      JSON.stringify(testRecord, null, 2),
-      'utf-8',
-    );
+    await this._writeJson(path.posix.join('tests', params.test.testId!, 'result.json'), testRecord);
 
     return testRecord;
   }
@@ -565,14 +528,6 @@ export class ReportWriter {
     diagnosticsSummary?: string;
   }): RunManifest {
     const testRecords = params.tests.map((test) => this._toRunManifestTest(test));
-    const stepTotal = testRecords.reduce(
-      (total, test) => total + (test.counts?.executionStepsTotal ?? 0),
-      0,
-    );
-    const stepPassed = testRecords.reduce(
-      (total, test) => total + (test.counts?.executionStepsPassed ?? 0),
-      0,
-    );
     const firstFailure = findRunFirstFailure(testRecords, params.diagnosticsSummary);
     return {
       schemaVersion: 3,
@@ -583,28 +538,14 @@ export class ReportWriter {
         failurePhase: params.failurePhase,
         startedAt: params.startedAt,
         completedAt: params.completedAt,
-        durationMs: Math.max(
-          0,
-          new Date(params.completedAt).getTime() - new Date(params.startedAt).getTime(),
-        ),
+        durationMs: durationMsBetween(params.startedAt, params.completedAt),
         envName: this._envName,
         platform: this._platform,
         model: this._modelContext,
         app: this._appContext,
         selectors: this._cliContext.selectors,
         target: this._runTarget,
-        counts: {
-          tests: {
-            total: testRecords.length,
-            passed: testRecords.filter((test) => test.success).length,
-            failed: testRecords.filter((test) => !test.success).length,
-          },
-          steps: {
-            total: stepTotal,
-            passed: stepPassed,
-            failed: stepTotal - stepPassed,
-          },
-        },
+        counts: buildRunManifestCounts(testRecords),
         firstFailure,
         diagnosticsSummary: params.diagnosticsSummary,
       },
@@ -628,21 +569,6 @@ export class ReportWriter {
     const snapshot = this._testSnapshots.get(test.testId);
     const steps = test.steps.map((step) => ({ ...step })) as AgentAction[];
     const passedSteps = steps.filter((step) => step.success).length;
-    const firstFailureStep = steps.find((step) => !step.success);
-    const firstFailure: FirstFailure | undefined = firstFailureStep
-      ? {
-          testId: test.testId,
-          testName: test.testName,
-          stepNumber: firstFailureStep.stepNumber,
-          actionType: firstFailureStep.actionType,
-          message:
-            firstFailureStep.errorMessage ??
-            firstFailureStep.trace?.failureReason ??
-            test.message,
-          screenshotPath: firstFailureStep.screenshotFile,
-          stepJsonPath: firstFailureStep.stepJsonFile,
-        }
-      : undefined;
 
     return {
       ...test,
@@ -650,27 +576,14 @@ export class ReportWriter {
       snapshotYamlPath: snapshot?.snapshotYamlPath ?? '',
       snapshotJsonPath: snapshot?.snapshotJsonPath ?? '',
       bindingReferences: snapshot?.bindingReferences ?? { variables: [], secrets: [] },
-      authored: snapshot?.authored
-        ? {
-            name: snapshot.authored.name,
-            description: snapshot.authored.description,
-            setup: snapshot.authored.setup,
-            steps: snapshot.authored.steps,
-            expected_state: snapshot.authored.expected_state,
-          }
-        : {
-            name: test.testName,
-            setup: [],
-            steps: [],
-            expected_state: [],
-          },
+      authored: toAuthoredRecord(snapshot, test),
       effectiveGoal: snapshot?.effectiveGoal ?? '',
       counts: {
         executionStepsTotal: steps.length,
         executionStepsPassed: passedSteps,
         executionStepsFailed: steps.length - passedSteps,
       },
-      firstFailure,
+      firstFailure: findTestFirstFailure(test, steps),
       previewScreenshotPath: selectPreviewScreenshotPath(steps),
       resultJsonPath: path.posix.join('tests', test.testId, 'result.json'),
       steps,
@@ -753,6 +666,103 @@ export class ReportWriter {
   private _formatError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
+}
+
+function durationMsBetween(startedAt: string, completedAt: string): number {
+  return Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime());
+}
+
+function findTestFirstFailure(test: TestResult, steps: AgentAction[]): FirstFailure | undefined {
+  const firstFailureStep = steps.find((step) => !step.success);
+  return firstFailureStep
+    ? {
+        testId: test.testId,
+        testName: test.testName,
+        stepNumber: firstFailureStep.stepNumber,
+        actionType: firstFailureStep.actionType,
+        message:
+          firstFailureStep.errorMessage ??
+          firstFailureStep.trace?.failureReason ??
+          test.message,
+        screenshotPath: firstFailureStep.screenshotFile,
+        stepJsonPath: firstFailureStep.stepJsonFile,
+      }
+    : undefined;
+}
+
+function toAuthoredRecord(
+  snapshot: TestSnapshotState | undefined,
+  test: TestResult,
+): TestResult['authored'] {
+  return snapshot?.authored
+    ? {
+        name: snapshot.authored.name,
+        description: snapshot.authored.description,
+        setup: snapshot.authored.setup,
+        steps: snapshot.authored.steps,
+        expected_state: snapshot.authored.expected_state,
+      }
+    : {
+        name: test.testName,
+        setup: [],
+        steps: [],
+        expected_state: [],
+      };
+}
+
+function buildRunManifestCounts(testRecords: TestResult[]): RunManifest['run']['counts'] {
+  const stepTotal = testRecords.reduce(
+    (total, test) => total + (test.counts?.executionStepsTotal ?? 0),
+    0,
+  );
+  const stepPassed = testRecords.reduce(
+    (total, test) => total + (test.counts?.executionStepsPassed ?? 0),
+    0,
+  );
+  return {
+    tests: {
+      total: testRecords.length,
+      passed: testRecords.filter((test) => test.success).length,
+      failed: testRecords.filter((test) => !test.success).length,
+    },
+    steps: {
+      total: stepTotal,
+      passed: stepPassed,
+      failed: stepTotal - stepPassed,
+    },
+  };
+}
+
+function buildRunFailureStep(params: {
+  failureMessage: string;
+  startedAt: string;
+  completedAt: string;
+  screenshotRelative: string;
+  stepJsonRelative: string;
+}): AgentAction {
+  return {
+    stepNumber: 1,
+    iteration: 1,
+    actionType: 'run_failure',
+    naturalLanguageAction: 'Run setup failed before the first recorded agent action.',
+    reason: params.failureMessage,
+    analysis: 'No executable agent step completed before the run failed.',
+    success: false,
+    status: 'failure',
+    errorMessage: params.failureMessage,
+    durationMs: durationMsBetween(params.startedAt, params.completedAt),
+    timestamp: params.completedAt,
+    screenshotFile: params.screenshotRelative,
+    stepJsonFile: params.stepJsonRelative,
+    trace: {
+      step: 1,
+      action: 'run_failure',
+      status: 'failure',
+      totalMs: durationMsBetween(params.startedAt, params.completedAt),
+      spans: [],
+      failureReason: params.failureMessage,
+    },
+  };
 }
 
 function resolveTestStatus(result: TestExecutionResult): TestStatus {
