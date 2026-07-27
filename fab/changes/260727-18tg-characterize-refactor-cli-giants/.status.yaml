@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 9
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-27T10:59:06Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-27T11:14:29Z"}
     review: {started_at: "2026-07-27T11:14:29Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-27T11:44:21Z"}
     hydrate: {started_at: "2026-07-27T11:44:21Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T11:54:46Z"}
-    ship: {started_at: "2026-07-27T11:54:46Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-27T11:54:46Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T11:57:43Z"}
+    review-pr: {started_at: "2026-07-27T11:57:43Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/161
 change_type_source: explicit
 true_impact:
-    added: 32
-    deleted: 0
-    net: 32
+    added: 3277
+    deleted: 576
+    net: 2701
     tests:
-        added: 0
+        added: 1924
         deleted: 0
-        net: 0
-    computed_at: "2026-07-27T11:54:46Z"
-    computed_at_stage: hydrate
+        net: 1924
+    computed_at: "2026-07-27T11:57:43Z"
+    computed_at_stage: ship
 summary: Rewrote cli/report-writer.md to the refactored source, added cli/session-runner.md, corrected the stale remaining-untested list and sharpened the finally-scope DD with its acquisition-registration ordering facet in ci/pr-quality-gate.md
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-27T11:54:46Z
+last_updated: 2026-07-27T11:57:43Z
