@@ -1,2 +1,13 @@
 {"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-27T09:08:49Z"}
 {"args":"Characterize then refactor the two untested cli giants: reportWriter.ts (7 warnings, pure file-writer) first, then sessionRunner.ts (4 warnings, device-session orchestrator with no DI seam). 11 warnings total.","cmd":"fab-new","event":"command","ts":"2026-07-27T09:08:49Z"}
+{"delta":"+4.9","event":"confidence","score":4.9,"trigger":"calc-score","ts":"2026-07-27T09:10:29Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-27T09:46:16Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-27T09:47:33Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-27T10:37:03Z"}
+{"event":"review","result":"failed","ts":"2026-07-27T10:59:06Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-27T10:59:06Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-27T11:00:35Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-27T11:14:29Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-27T11:44:21Z"}
+{"event":"review","result":"passed","ts":"2026-07-27T11:44:21Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-27T11:54:46Z"}

@@ -21,7 +21,7 @@ The log capture system mirrors RecordingManager/RecordingProvider exactly:
 - **Map key**: `{runId}###{testId}` (same delimiter as RecordingManager).
 - **Three maps**: `_logProcessMap` (ChildProcess), `_logInfoMap` (LogInfo), `_deviceToLogKeysMap` (deviceId to keys).
 - **Stopped set**: `_stoppedTestCases` Set prevents double-stop.
-- **Output path**: `<os.tmpdir()>/finalrun-logs/{sanitizedRunId}_{sanitizedTestId}.log`. Never writes directly to the report directory.
+- **Output path**: `<os.tmpdir()>/finalrun-logs/{sanitizedRunId}_{sanitizedTestId}.log`. Never writes directly to the report directory — the CLI copies the finished file in and redacts it there ([/cli/report-writer.md](/cli/report-writer.md)).
 - **Process stop**: SIGINT + `_waitForExit` (listens for `exit` event via `once`), then unpipes stdout. Both providers use this pattern.
 - **Provider selection**: Constructor accepts optional providers map; defaults to `PLATFORM_ANDROID -> AndroidLogcatProvider`, `PLATFORM_IOS -> IOSLogProvider`.
 - **Default instance**: `defaultLogCaptureManager` exported as a singleton.
@@ -34,7 +34,7 @@ The log capture system mirrors RecordingManager/RecordingProvider exactly:
 - `abortLogCapture(runId, keepOutput)` -- delegates with deviceId and platform
 - `logCaptureCleanUp()` -- called from `closeConnection()` after `recordingCleanUp()`
 
-`GrpcDriverSetup.setUp()` (`src/grpc/GrpcDriverSetup.ts`) instantiates and injects `LogCaptureManager` into Device alongside RecordingManager.
+`GrpcDriverSetup.setUp()` (`src/grpc/GrpcDriverSetup.ts`) instantiates and injects `LogCaptureManager` into Device alongside RecordingManager. The per-test caller that drives start/stop/abort across one goal execution is [/cli/session-runner.md](/cli/session-runner.md).
 
 ## Error Handling
 

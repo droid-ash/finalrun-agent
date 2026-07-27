@@ -135,6 +135,8 @@ export const testSessionDeps: TestSessionDeps = {
   createRenderer: () => new TerminalRenderer(),
 };
 
+type AdbPath = Awaited<ReturnType<CliFilePathUtil['getADBPath']>>;
+
 export async function prepareTestSession(
   config: GoalSessionConfig,
   dependencies: TestSessionDeps = testSessionDeps,
@@ -156,123 +158,24 @@ export async function prepareTestSession(
   };
 
   try {
-    let inventory = await deviceNode.detectInventory(adbPath);
-    let scopedEntries = filterInventoryEntries(inventory.entries, config.platform);
-    let scopedDiagnostics = filterInventoryDiagnostics(inventory.diagnostics, config.platform);
-    const selectableEntries = getSelectableEntries(scopedEntries);
-    if (selectableEntries.length === 1) {
-      Logger.i(buildAutoSelectionSummary(scopedEntries, selectableEntries[0]!));
-    } else if (selectableEntries.length === 0) {
-      printInventorySummary({
-        heading: 'Detected local targets',
-        entries: scopedEntries,
-        selectableEntries,
-        output: selectionIO.output,
-      });
-    }
-
-    let selectedEntry = await chooseInventoryEntry({
-      entries: scopedEntries,
-      diagnostics: scopedDiagnostics,
+    let selectedEntry = await detectAndChooseEntry({
+      deviceNode,
+      adbPath,
       requestedPlatform: config.platform,
       selectionIO,
     });
 
     if (selectedEntry.startable) {
-      Logger.i(`Starting device: ${selectedEntry.displayName}`);
-      Logger.i('Waiting for the selected device to become ready...');
-      const startupDiagnostic = await deviceNode.startTarget(selectedEntry, adbPath);
-      if (startupDiagnostic) {
-        printDiagnosticsFailure({
-          heading: 'Device startup failed',
-          diagnostics: [startupDiagnostic],
-          output: selectionIO.output,
-        });
-        throw new DevicePreparationError(startupDiagnostic.summary, [startupDiagnostic]);
-      }
-
-      inventory = await deviceNode.detectInventory(adbPath);
-      scopedEntries = filterInventoryEntries(inventory.entries, config.platform);
-      scopedDiagnostics = filterInventoryDiagnostics(inventory.diagnostics, config.platform);
-      const startedEntry = scopedEntries.find(
-        (entry) => entry.selectionId === selectedEntry.selectionId && entry.runnable,
-      ) ?? null;
-
-      if (!startedEntry?.deviceInfo) {
-        if (scopedDiagnostics.length > 0) {
-          printDiagnosticsFailure({
-            heading: 'Device startup failed',
-            diagnostics: scopedDiagnostics,
-            output: selectionIO.output,
-          });
-        }
-        throw new DevicePreparationError(
-          'The selected device did not become runnable after startup.',
-          scopedDiagnostics,
-        );
-      }
-
-      selectedEntry = startedEntry;
+      selectedEntry = await startEntryAndReselect({
+        deviceNode,
+        adbPath,
+        requestedPlatform: config.platform,
+        selectionIO,
+        selectedEntry,
+      });
     }
 
-    if (!selectedEntry?.deviceInfo) {
-      throw new DevicePreparationError('No runnable device is available for this run.');
-    }
-
-    const deviceInfo = selectedEntry.deviceInfo;
-    const platform = deviceInfo.isAndroid ? PLATFORM_ANDROID : 'ios';
-    Logger.i(`Using device: ${selectedEntry.displayName}`);
-
-    Logger.i('Setting up device...');
-    const device = await deviceNode.setUpDevice(deviceInfo);
-    Logger.i('Driver connected.');
-
-    if (config.appOverridePath) {
-      Logger.i(`Installing app override: ${config.appOverridePath}`);
-      if (platform === PLATFORM_ANDROID) {
-        if (!deviceInfo.id) {
-          throw new Error('Android device serial is required to install an app override.');
-        }
-        const installed = await deviceNode.installAndroidApp(
-          adbPath!,
-          deviceInfo.id,
-          config.appOverridePath,
-        );
-        if (!installed) {
-          throw new Error(
-            `Failed to install Android app override after driver connection: ${config.appOverridePath}`,
-          );
-        }
-      } else {
-        if (!deviceInfo.id) {
-          throw new Error('iOS simulator ID is required to install an app override.');
-        }
-        const installed = await deviceNode.installIOSApp(
-          deviceInfo.id,
-          config.appOverridePath,
-        );
-        if (!installed) {
-          throw new Error(
-            `Failed to install iOS app override after driver connection: ${config.appOverridePath}`,
-          );
-        }
-      }
-    }
-
-    let launchSummary: string | undefined;
-    if (config.app) {
-      launchSummary = await ensureAppReady(device, config.app);
-    }
-
-    return {
-      deviceNode,
-      device,
-      deviceInfo,
-      platform,
-      app: config.app,
-      launchSummary,
-      cleanup,
-    };
+    return await establishDeviceSession({ deviceNode, adbPath, config, selectedEntry, cleanup });
   } catch (error) {
     try {
       await cleanup();
@@ -283,239 +186,496 @@ export async function prepareTestSession(
   }
 }
 
+/** Connects the driver to the chosen entry, applies overrides, and builds the session. */
+async function establishDeviceSession(params: {
+  deviceNode: GoalRunnerDeviceNode;
+  adbPath: AdbPath;
+  config: GoalSessionConfig;
+  selectedEntry: DeviceInventoryEntry;
+  cleanup: () => Promise<void>;
+}): Promise<TestSession> {
+  if (!params.selectedEntry?.deviceInfo) {
+    throw new DevicePreparationError('No runnable device is available for this run.');
+  }
+
+  const deviceInfo = params.selectedEntry.deviceInfo;
+  const platform = deviceInfo.isAndroid ? PLATFORM_ANDROID : 'ios';
+  Logger.i(`Using device: ${params.selectedEntry.displayName}`);
+
+  Logger.i('Setting up device...');
+  const device = await params.deviceNode.setUpDevice(deviceInfo);
+  Logger.i('Driver connected.');
+
+  if (params.config.appOverridePath) {
+    await installAppOverride({
+      deviceNode: params.deviceNode,
+      adbPath: params.adbPath,
+      deviceInfo,
+      platform,
+      appOverridePath: params.config.appOverridePath,
+    });
+  }
+
+  let launchSummary: string | undefined;
+  if (params.config.app) {
+    launchSummary = await ensureAppReady(device, params.config.app);
+  }
+
+  return {
+    deviceNode: params.deviceNode,
+    device,
+    deviceInfo,
+    platform,
+    app: params.config.app,
+    launchSummary,
+    cleanup: params.cleanup,
+  };
+}
+
+/** Detects local targets, prints the inventory context, and picks an entry. */
+async function detectAndChooseEntry(params: {
+  deviceNode: GoalRunnerDeviceNode;
+  adbPath: AdbPath;
+  requestedPlatform?: string;
+  selectionIO: DeviceSelectionIO;
+}): Promise<DeviceInventoryEntry> {
+  const inventory = await params.deviceNode.detectInventory(params.adbPath);
+  const scopedEntries = filterInventoryEntries(inventory.entries, params.requestedPlatform);
+  const scopedDiagnostics = filterInventoryDiagnostics(
+    inventory.diagnostics,
+    params.requestedPlatform,
+  );
+  const selectableEntries = getSelectableEntries(scopedEntries);
+  if (selectableEntries.length === 1) {
+    Logger.i(buildAutoSelectionSummary(scopedEntries, selectableEntries[0]!));
+  } else if (selectableEntries.length === 0) {
+    printInventorySummary({
+      heading: 'Detected local targets',
+      entries: scopedEntries,
+      selectableEntries,
+      output: params.selectionIO.output,
+    });
+  }
+
+  return await chooseInventoryEntry({
+    entries: scopedEntries,
+    diagnostics: scopedDiagnostics,
+    requestedPlatform: params.requestedPlatform,
+    selectionIO: params.selectionIO,
+  });
+}
+
+/** Starts a startable entry, re-detects, and returns the now-runnable entry. */
+async function startEntryAndReselect(params: {
+  deviceNode: GoalRunnerDeviceNode;
+  adbPath: AdbPath;
+  requestedPlatform?: string;
+  selectionIO: DeviceSelectionIO;
+  selectedEntry: DeviceInventoryEntry;
+}): Promise<DeviceInventoryEntry> {
+  Logger.i(`Starting device: ${params.selectedEntry.displayName}`);
+  Logger.i('Waiting for the selected device to become ready...');
+  const startupDiagnostic = await params.deviceNode.startTarget(
+    params.selectedEntry,
+    params.adbPath,
+  );
+  if (startupDiagnostic) {
+    printDiagnosticsFailure({
+      heading: 'Device startup failed',
+      diagnostics: [startupDiagnostic],
+      output: params.selectionIO.output,
+    });
+    throw new DevicePreparationError(startupDiagnostic.summary, [startupDiagnostic]);
+  }
+
+  const inventory = await params.deviceNode.detectInventory(params.adbPath);
+  const scopedEntries = filterInventoryEntries(inventory.entries, params.requestedPlatform);
+  const scopedDiagnostics = filterInventoryDiagnostics(
+    inventory.diagnostics,
+    params.requestedPlatform,
+  );
+  const startedEntry = scopedEntries.find(
+    (entry) => entry.selectionId === params.selectedEntry.selectionId && entry.runnable,
+  ) ?? null;
+
+  if (!startedEntry?.deviceInfo) {
+    if (scopedDiagnostics.length > 0) {
+      printDiagnosticsFailure({
+        heading: 'Device startup failed',
+        diagnostics: scopedDiagnostics,
+        output: params.selectionIO.output,
+      });
+    }
+    throw new DevicePreparationError(
+      'The selected device did not become runnable after startup.',
+      scopedDiagnostics,
+    );
+  }
+
+  return startedEntry;
+}
+
+/** Installs the --app override onto the connected device, per platform. */
+async function installAppOverride(params: {
+  deviceNode: GoalRunnerDeviceNode;
+  adbPath: AdbPath;
+  deviceInfo: DeviceInfo;
+  platform: string;
+  appOverridePath: string;
+}): Promise<void> {
+  Logger.i(`Installing app override: ${params.appOverridePath}`);
+  if (params.platform === PLATFORM_ANDROID) {
+    if (!params.deviceInfo.id) {
+      throw new Error('Android device serial is required to install an app override.');
+    }
+    const installed = await params.deviceNode.installAndroidApp(
+      params.adbPath!,
+      params.deviceInfo.id,
+      params.appOverridePath,
+    );
+    if (!installed) {
+      throw new Error(
+        `Failed to install Android app override after driver connection: ${params.appOverridePath}`,
+      );
+    }
+  } else {
+    if (!params.deviceInfo.id) {
+      throw new Error('iOS simulator ID is required to install an app override.');
+    }
+    const installed = await params.deviceNode.installIOSApp(
+      params.deviceInfo.id,
+      params.appOverridePath,
+    );
+    if (!installed) {
+      throw new Error(
+        `Failed to install iOS app override after driver connection: ${params.appOverridePath}`,
+      );
+    }
+  }
+}
+
+/** A started recording or log capture that still needs to be stopped or aborted. */
+interface ActiveCapture {
+  runId: string;
+  testId: string;
+  startedAt: string;
+  keepPartialOnFailure: boolean;
+}
+
+/**
+ * Per-call state accumulated across executeTestOnSession's phases. Each phase
+ * records what it acquired here, and the orchestrator's `finally` releases
+ * whatever is still held on any exit path.
+ */
+interface ExecutionSessionState {
+  abortListener?: () => void;
+  activeRecording?: ActiveCapture;
+  activeLogCapture?: ActiveCapture;
+}
+
 export async function executeTestOnSession(
   session: TestSession,
   config: TestSessionConfig,
   dependencies: TestSessionDeps = testSessionDeps,
 ): Promise<TestExecutionResult> {
   const renderer = dependencies.createRenderer();
-  let abortListener: (() => void) | undefined;
-  let activeRecording:
-    | {
-        runId: string;
-        testId: string;
-        startedAt: string;
-        keepPartialOnFailure: boolean;
-      }
-    | undefined;
-  let activeLogCapture:
-    | {
-        runId: string;
-        testId: string;
-        startedAt: string;
-        keepPartialOnFailure: boolean;
-      }
-    | undefined;
+  const state: ExecutionSessionState = {};
 
   try {
-    const aiAgent = dependencies.createAiAgent({
-      apiKeys: config.apiKeys,
-      defaults: config.defaults,
-      features: config.features,
-    });
-
-    const executor = dependencies.createExecutor({
-      goal: config.goal,
-      platform: session.platform,
-      maxIterations: config.maxIterations,
-      agent: session.device,
-      aiAgent,
-      preContext: session.launchSummary,
-      appIdentifier: session.app?.identifier,
-      runtimeBindings: config.runtimeBindings,
-    });
+    const executor = createSessionExecutor(session, config, dependencies);
     if (config.abortSignal?.aborted) {
       const abortedResult = createAbortedTestResult(session.platform);
       renderer.printSummary(abortedResult);
       return abortedResult;
     }
-    if (config.abortSignal) {
-      abortListener = () => {
-        executor.abort();
-      };
-      config.abortSignal.addEventListener('abort', abortListener);
-    }
+    wireAbortSignal(config, executor, state);
 
     const recordingRequired =
       config.recording !== undefined && session.platform === PLATFORM_ANDROID;
 
     if (config.recording) {
-      const recordingResponse = await session.device.startRecording(
-        new RecordingRequest({
-          runId: config.recording.runId,
-          testId: config.recording.testId,
-          apiKey: config.apiKeys[config.defaults.provider] ?? '',
-          outputFilePath: config.recording.outputFilePath,
-        }),
-      );
-
-      if (recordingResponse.success) {
-        activeRecording = {
-          runId: config.recording.runId,
-          testId: config.recording.testId,
-          startedAt:
-            typeof recordingResponse.data?.['startedAt'] === 'string'
-              ? (recordingResponse.data['startedAt'] as string)
-              : new Date().toISOString(),
-          keepPartialOnFailure: config.recording.keepPartialOnFailure ?? false,
-        };
-        Logger.i(
-          `Recording started for test ${config.recording.testId} at ${activeRecording.startedAt}`,
-        );
-      } else {
-        const message =
-          `Unable to start recording for test ${config.recording.testId}: ` +
-          `${recordingResponse.message ?? 'unknown recording error'}`;
-        if (recordingRequired) {
-          Logger.e(message);
-          const failureResult = createRecordingFailureResult({
-            platform: session.platform,
-            message: `Recording is required for Android runs. ${message}`,
-          });
-          renderer.printSummary(failureResult);
-          return failureResult;
-        }
-        Logger.w(message);
+      const outcome =
+        await startRecordingPhase(session, config, config.recording, recordingRequired, state);
+      if (outcome.failureResult) {
+        renderer.printSummary(outcome.failureResult);
+        return outcome.failureResult;
       }
     }
 
     if (config.deviceLog) {
-      try {
-        const logResponse = await session.device.startLogCapture({
-          runId: config.deviceLog.runId,
-          testId: config.deviceLog.testId,
-          appIdentifier: session.app?.identifier,
-        });
-
-        if (logResponse.success) {
-          activeLogCapture = {
-            runId: config.deviceLog.runId,
-            testId: config.deviceLog.testId,
-            startedAt:
-              typeof logResponse.data?.['startedAt'] === 'string'
-                ? (logResponse.data['startedAt'] as string)
-                : new Date().toISOString(),
-            keepPartialOnFailure: config.deviceLog.keepPartialOnFailure ?? false,
-          };
-          Logger.i(
-            `Log capture started for test ${config.deviceLog.testId} at ${activeLogCapture.startedAt}`,
-          );
-        } else {
-          Logger.w(
-            `Unable to start log capture for test ${config.deviceLog.testId}: ` +
-            `${logResponse.message ?? 'unknown log capture error'}`,
-          );
-        }
-      } catch (error) {
-        Logger.w('Failed to start device log capture:', error);
-      }
+      await startLogCapturePhase(session, config.deviceLog, state);
     }
 
     // Execute!
     let result = await executor.executeGoal((event) => renderer.onProgress(event));
 
     let recording: TestRecordingResult | undefined;
-    if (activeRecording) {
-      const stopResponse = await session.device.stopRecording(
-        activeRecording.runId,
-        activeRecording.testId,
+    if (state.activeRecording) {
+      const stopOutcome = await stopRecordingPhase(
+        session.device,
+        state.activeRecording,
+        recordingRequired,
       );
-      if (stopResponse.success) {
-        const filePath = stopResponse.data?.['filePath'];
-        if (typeof filePath === 'string') {
-          recording = {
-            filePath,
-            startedAt:
-              typeof stopResponse.data?.['startedAt'] === 'string'
-                ? (stopResponse.data['startedAt'] as string)
-                : activeRecording.startedAt,
-            completedAt:
-              typeof stopResponse.data?.['completedAt'] === 'string'
-                ? (stopResponse.data['completedAt'] as string)
-                : new Date().toISOString(),
-          };
-        } else if (recordingRequired) {
-          const message =
-            `Recording is required for Android runs. ` +
-            `Recording stopped for test ${activeRecording.testId} but no file path was returned.`;
-          Logger.e(message);
-          result = markGoalResultFailed(result, message);
-        } else {
-          Logger.w(
-            `Recording stopped for test ${activeRecording.testId} but no file path was returned.`,
-          );
-        }
-      } else {
-        const message =
-          `Unable to stop recording for test ${activeRecording.testId}: ` +
-          `${stopResponse.message ?? 'unknown recording error'}`;
-        try {
-          await session.device.abortRecording(
-            activeRecording.runId,
-            activeRecording.keepPartialOnFailure,
-          );
-        } catch (error) {
-          Logger.w('Failed to finalize recording after stop failure:', error);
-        }
-        if (recordingRequired) {
-          Logger.e(message);
-          result = markGoalResultFailed(
-            result,
-            `Recording is required for Android runs. ${message}`,
-          );
-        } else {
-          Logger.w(message);
-        }
+      recording = stopOutcome.recording;
+      if (stopOutcome.failureMessage) {
+        result = markGoalResultFailed(result, stopOutcome.failureMessage);
       }
-      activeRecording = undefined;
+      state.activeRecording = undefined;
     }
 
     let deviceLog: DeviceLogCaptureResult | undefined;
-    if (activeLogCapture) {
+    if (state.activeLogCapture) {
       try {
-        deviceLog = await stopActiveLogCapture(session.device, activeLogCapture);
-        activeLogCapture = undefined;
+        deviceLog = await stopActiveLogCapture(session.device, state.activeLogCapture);
+        state.activeLogCapture = undefined;
       } catch (error) {
         Logger.w('Failed to stop device log capture:', error);
         // Do NOT clear activeLogCapture here — let the finally block abort it
       }
     }
 
-    const finalResult = recording
-      ? { ...result, recording, ...(deviceLog ? { deviceLog } : {}) }
-      : deviceLog
-        ? { ...result, deviceLog }
-        : result;
+    const finalResult = composeFinalResult(result, recording, deviceLog);
     // Print summary
     renderer.printSummary(finalResult);
 
     return finalResult;
   } finally {
-    if (abortListener && config.abortSignal) {
-      config.abortSignal.removeEventListener('abort', abortListener);
-    }
-    if (activeRecording) {
-      try {
-        await session.device.abortRecording(
-          activeRecording.runId,
-          activeRecording.keepPartialOnFailure,
-        );
-      } catch (error) {
-        Logger.w('Failed to abort active recording during cleanup:', error);
-      }
-    }
-    if (activeLogCapture) {
-      try {
-        await session.device.abortLogCapture(
-          activeLogCapture.runId,
-          activeLogCapture.keepPartialOnFailure,
-        );
-      } catch (error) {
-        Logger.w('Failed to abort active log capture during cleanup:', error);
-      }
-    }
-    renderer.destroy();
+    await releaseSessionResources(session, config, state, renderer);
   }
+}
+
+/** Builds the AI agent and goal executor for this session run. */
+function createSessionExecutor(
+  session: TestSession,
+  config: TestSessionConfig,
+  dependencies: TestSessionDeps,
+): GoalRunnerExecutor {
+  const aiAgent = dependencies.createAiAgent({
+    apiKeys: config.apiKeys,
+    defaults: config.defaults,
+    features: config.features,
+  });
+
+  return dependencies.createExecutor({
+    goal: config.goal,
+    platform: session.platform,
+    maxIterations: config.maxIterations,
+    agent: session.device,
+    aiAgent,
+    preContext: session.launchSummary,
+    appIdentifier: session.app?.identifier,
+    runtimeBindings: config.runtimeBindings,
+  });
+}
+
+/** Forwards an external abort signal to the executor, tracked for removal. */
+function wireAbortSignal(
+  config: TestSessionConfig,
+  executor: GoalRunnerExecutor,
+  state: ExecutionSessionState,
+): void {
+  if (!config.abortSignal) {
+    return;
+  }
+  state.abortListener = () => {
+    executor.abort();
+  };
+  config.abortSignal.addEventListener('abort', state.abortListener);
+}
+
+/** Reads a string field from a driver response's data payload. */
+function readDataString(
+  data: Record<string, unknown> | null | undefined,
+  key: string,
+): string | undefined {
+  const value = data?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Starts the screen recording. On success the acquired capture is recorded in
+ * `state.activeRecording` BEFORE the "started" log line, so a throwing logger
+ * sink can never orphan a started recording (the orchestrator's `finally`
+ * still sees it). On a start failure, returns a failure result when recording
+ * is required and nothing at all (a warning only) when it is optional.
+ */
+async function startRecordingPhase(
+  session: TestSession,
+  config: TestSessionConfig,
+  recording: NonNullable<TestSessionConfig['recording']>,
+  recordingRequired: boolean,
+  state: ExecutionSessionState,
+): Promise<{ failureResult?: TestExecutionResult }> {
+  const recordingResponse = await session.device.startRecording(
+    new RecordingRequest({
+      runId: recording.runId,
+      testId: recording.testId,
+      apiKey: config.apiKeys[config.defaults.provider] ?? '',
+      outputFilePath: recording.outputFilePath,
+    }),
+  );
+
+  if (recordingResponse.success) {
+    state.activeRecording = {
+      runId: recording.runId,
+      testId: recording.testId,
+      startedAt: readDataString(recordingResponse.data, 'startedAt') ?? new Date().toISOString(),
+      keepPartialOnFailure: recording.keepPartialOnFailure ?? false,
+    };
+    Logger.i(`Recording started for test ${recording.testId} at ${state.activeRecording.startedAt}`);
+    return {};
+  }
+
+  const message =
+    `Unable to start recording for test ${recording.testId}: ` +
+    `${recordingResponse.message ?? 'unknown recording error'}`;
+  if (recordingRequired) {
+    Logger.e(message);
+    return {
+      failureResult: createRecordingFailureResult({
+        platform: session.platform,
+        message: `Recording is required for Android runs. ${message}`,
+      }),
+    };
+  }
+  Logger.w(message);
+  return {};
+}
+
+/**
+ * Starts the device log capture; a start failure only warns. On success the
+ * acquired capture is recorded in `state.activeLogCapture` BEFORE the
+ * "started" log line, so a logger sink throwing on that line (swallowed by
+ * this helper's own catch, as on the pre-refactor source) still leaves the
+ * capture tracked for the normal stop path.
+ */
+async function startLogCapturePhase(
+  session: TestSession,
+  deviceLog: NonNullable<TestSessionConfig['deviceLog']>,
+  state: ExecutionSessionState,
+): Promise<void> {
+  try {
+    const logResponse = await session.device.startLogCapture({
+      runId: deviceLog.runId,
+      testId: deviceLog.testId,
+      appIdentifier: session.app?.identifier,
+    });
+
+    if (logResponse.success) {
+      state.activeLogCapture = {
+        runId: deviceLog.runId,
+        testId: deviceLog.testId,
+        startedAt: readDataString(logResponse.data, 'startedAt') ?? new Date().toISOString(),
+        keepPartialOnFailure: deviceLog.keepPartialOnFailure ?? false,
+      };
+      Logger.i(
+        `Log capture started for test ${deviceLog.testId} at ${state.activeLogCapture.startedAt}`,
+      );
+      return;
+    }
+    Logger.w(
+      `Unable to start log capture for test ${deviceLog.testId}: ` +
+      `${logResponse.message ?? 'unknown log capture error'}`,
+    );
+  } catch (error) {
+    Logger.w('Failed to start device log capture:', error);
+  }
+}
+
+/**
+ * Stops the active recording. Returns the recording record when a file was
+ * produced; when recording is required and no file materialized, returns the
+ * failure message to mark the goal result with.
+ */
+async function stopRecordingPhase(
+  device: TestSession['device'],
+  capture: ActiveCapture,
+  recordingRequired: boolean,
+): Promise<{ recording?: TestRecordingResult; failureMessage?: string }> {
+  const stopResponse = await device.stopRecording(capture.runId, capture.testId);
+  if (stopResponse.success) {
+    const filePath = readDataString(stopResponse.data, 'filePath');
+    if (filePath !== undefined) {
+      return {
+        recording: {
+          filePath,
+          startedAt: readDataString(stopResponse.data, 'startedAt') ?? capture.startedAt,
+          completedAt:
+            readDataString(stopResponse.data, 'completedAt') ?? new Date().toISOString(),
+        },
+      };
+    }
+    if (recordingRequired) {
+      const message =
+        `Recording is required for Android runs. ` +
+        `Recording stopped for test ${capture.testId} but no file path was returned.`;
+      Logger.e(message);
+      return { failureMessage: message };
+    }
+    Logger.w(`Recording stopped for test ${capture.testId} but no file path was returned.`);
+    return {};
+  }
+
+  const message =
+    `Unable to stop recording for test ${capture.testId}: ` +
+    `${stopResponse.message ?? 'unknown recording error'}`;
+  try {
+    await device.abortRecording(capture.runId, capture.keepPartialOnFailure);
+  } catch (error) {
+    Logger.w('Failed to finalize recording after stop failure:', error);
+  }
+  if (recordingRequired) {
+    Logger.e(message);
+    return { failureMessage: `Recording is required for Android runs. ${message}` };
+  }
+  Logger.w(message);
+  return {};
+}
+
+/** Merges recording and device-log records onto the result only when present. */
+function composeFinalResult(
+  result: TestExecutionResult,
+  recording: TestRecordingResult | undefined,
+  deviceLog: DeviceLogCaptureResult | undefined,
+): TestExecutionResult {
+  return recording
+    ? { ...result, recording, ...(deviceLog ? { deviceLog } : {}) }
+    : deviceLog
+      ? { ...result, deviceLog }
+      : result;
+}
+
+/** Releases everything still held in the per-call state, on every exit path. */
+async function releaseSessionResources(
+  session: TestSession,
+  config: TestSessionConfig,
+  state: ExecutionSessionState,
+  renderer: GoalRunnerRenderer,
+): Promise<void> {
+  if (state.abortListener && config.abortSignal) {
+    config.abortSignal.removeEventListener('abort', state.abortListener);
+  }
+  if (state.activeRecording) {
+    try {
+      await session.device.abortRecording(
+        state.activeRecording.runId,
+        state.activeRecording.keepPartialOnFailure,
+      );
+    } catch (error) {
+      Logger.w('Failed to abort active recording during cleanup:', error);
+    }
+  }
+  if (state.activeLogCapture) {
+    try {
+      await session.device.abortLogCapture(
+        state.activeLogCapture.runId,
+        state.activeLogCapture.keepPartialOnFailure,
+      );
+    } catch (error) {
+      Logger.w('Failed to abort active log capture during cleanup:', error);
+    }
+  }
+  renderer.destroy();
 }
 
 /**
@@ -527,12 +687,7 @@ export async function executeTestOnSession(
  */
 async function stopActiveLogCapture(
   device: TestSession['device'],
-  capture: {
-    runId: string;
-    testId: string;
-    startedAt: string;
-    keepPartialOnFailure: boolean;
-  },
+  capture: ActiveCapture,
 ): Promise<DeviceLogCaptureResult | undefined> {
   const stopLogResponse = await device.stopLogCapture(capture.runId, capture.testId);
   if (!stopLogResponse.success) {
@@ -548,8 +703,8 @@ async function stopActiveLogCapture(
     return undefined;
   }
 
-  const filePath = stopLogResponse.data?.['filePath'];
-  if (typeof filePath !== 'string') {
+  const filePath = readDataString(stopLogResponse.data, 'filePath');
+  if (filePath === undefined) {
     Logger.w(
       `Log capture stopped for test ${capture.testId} but no file path was returned.`,
     );
@@ -558,14 +713,8 @@ async function stopActiveLogCapture(
 
   return {
     filePath,
-    startedAt:
-      typeof stopLogResponse.data?.['startedAt'] === 'string'
-        ? (stopLogResponse.data['startedAt'] as string)
-        : capture.startedAt,
-    completedAt:
-      typeof stopLogResponse.data?.['completedAt'] === 'string'
-        ? (stopLogResponse.data['completedAt'] as string)
-        : new Date().toISOString(),
+    startedAt: readDataString(stopLogResponse.data, 'startedAt') ?? capture.startedAt,
+    completedAt: readDataString(stopLogResponse.data, 'completedAt') ?? new Date().toISOString(),
   };
 }
 
