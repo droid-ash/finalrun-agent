@@ -72,7 +72,7 @@ thinnest.
 
 **Read the three `_probe*` methods together first.** They are the same operation per platform —
 enumerate candidates, filter to ready ones, map to a `ProbeResult`. That is a sibling family in the
-#159 sense, and the shared shape is where most of the 8 warnings will fall. As before: factor only
+sense of PR #159, and the shared shape is where most of the 8 warnings will fall. As before: factor only
 what is genuinely common, and leave a platform difference its own path rather than forcing it
 through a shared abstraction.
 

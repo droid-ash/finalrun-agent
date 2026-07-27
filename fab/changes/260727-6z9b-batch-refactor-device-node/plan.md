@@ -200,6 +200,33 @@ comment now states the delta explicitly.
 TypeError to a caller at all. Replacing both texts with a designed diagnostic would be a genuine
 improvement, but it is a behaviour change and belongs in its own change.
 
+### Deferred from CodeRabbit review of PR #160 (both are behaviour changes)
+
+**1. Make `SimctlClient._trimmed` type-safe instead of documenting the TypeError delta.**
+CodeRabbit proposes `typeof value === 'string' ? value.trim() : undefined`, which would make a
+malformed `Info.plist` field degrade to `undefined` rather than aborting the whole `listapps` parse,
+and would delete the explanatory comment entirely. **This is the better end state and should be
+done** — it also aligns `SimctlClient` with its own package's convention, since
+`DeviceDiscoveryService._trimmedField` already uses exactly that guard, making the throwing form the
+outlier.
+
+Not done here because it is a **larger** behaviour change than the one it replaces: today a
+non-string throws and the parse aborts; with the guard the parse continues with an undefined field.
+Trading a documented diagnostic-string delta for an undocumented control-flow delta inside a PR
+whose claim is zero behaviour change would be the wrong direction. This initiative has spun three
+such fixes into their own changes (#155, #157, #158) and each was better for it. The follow-up
+should carry a test for the malformed-record path, which has no coverage today.
+
+**2. Cap the retained output in `_spawnEmulatorWithCapture`.**
+`stdoutChunks`/`stderrChunks` grow unbounded across the 120s emulator startup wait, so a chatty
+emulator accumulates an arbitrarily large in-memory buffer that is then joined into a diagnostic
+transcript. CodeRabbit suggests retaining only a trailing window.
+
+Valid, and **pre-existing**: `origin/main` pushes the same chunks with no bound (`:574-591`); the
+refactor moved the code into a helper without changing accumulation. Capping changes what the
+transcript contains on a long or noisy boot, which is observable output — a behaviour change, so it
+belongs in its own change alongside a decision about the window size.
+
 ### Pre-existing, not addressed here
 
 `DeviceDiscoveryService._startAndroidEmulator` releases the spawned child (`destroy`/`unref`) only on
