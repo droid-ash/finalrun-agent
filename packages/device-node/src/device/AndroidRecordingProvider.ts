@@ -79,38 +79,12 @@ export class AndroidRecordingProvider implements RecordingProvider {
         throw new Error('scrcpy not found in PATH');
       }
 
-      const args = [
-        '--serial',
-        params.deviceId,
-        '--no-window',
-        '--no-playback',
-        '--no-control',
-        '--no-audio',
-        '--record',
-        params.filePath,
-        '--record-format',
-        'mp4',
-      ];
+      const args = this._recordingArgs(params.deviceId, params.filePath);
       Logger.i(
         `AndroidRecordingProvider: Starting recording for device ${params.deviceId} with command: scrcpy ${args.join(' ')}`,
       );
 
-      const stdoutChunks: string[] = [];
-      const stderrChunks: string[] = [];
-      const process = this._spawnFn('scrcpy', args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }) as ChildProcess;
-
-      process.stdout?.on('data', (data: Buffer | string) => {
-        const message = String(data);
-        stdoutChunks.push(message);
-        Logger.i(`scrcpy stdout: ${message}`);
-      });
-      process.stderr?.on('data', (data: Buffer | string) => {
-        const message = String(data);
-        stderrChunks.push(message);
-        Logger.w(`scrcpy stderr: ${message}`);
-      });
+      const { process, stdoutChunks, stderrChunks } = this._spawnScrcpy(args);
 
       await this._awaitSpawn(process);
 
@@ -232,6 +206,47 @@ export class AndroidRecordingProvider implements RecordingProvider {
 
   async cleanupPlatformResources(deviceId: string): Promise<void> {
     Logger.i(`AndroidRecordingProvider: Cleaning up resources for device: ${deviceId}`);
+  }
+
+  private _recordingArgs(deviceId: string, filePath: string): string[] {
+    return [
+      '--serial',
+      deviceId,
+      '--no-window',
+      '--no-playback',
+      '--no-control',
+      '--no-audio',
+      '--record',
+      filePath,
+      '--record-format',
+      'mp4',
+    ];
+  }
+
+  /** Spawn scrcpy, mirroring its output into the logger and per-call chunk buffers. */
+  private _spawnScrcpy(args: string[]): {
+    process: ChildProcess;
+    stdoutChunks: string[];
+    stderrChunks: string[];
+  } {
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const process = this._spawnFn('scrcpy', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }) as ChildProcess;
+
+    process.stdout?.on('data', (data: Buffer | string) => {
+      const message = String(data);
+      stdoutChunks.push(message);
+      Logger.i(`scrcpy stdout: ${message}`);
+    });
+    process.stderr?.on('data', (data: Buffer | string) => {
+      const message = String(data);
+      stderrChunks.push(message);
+      Logger.w(`scrcpy stderr: ${message}`);
+    });
+
+    return { process, stdoutChunks, stderrChunks };
   }
 
   private async _commandExists(command: string): Promise<boolean> {

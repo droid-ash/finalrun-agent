@@ -1,5 +1,5 @@
 ---
-description: "Device interaction via gRPC: lifecycle, recording, log capture"
+description: "Device interaction via gRPC: lifecycle, recording, log capture, and the Android/iOS mirror — what the two platform branches share and what stays per-platform"
 ---
 # device-node
 
@@ -7,4 +7,5 @@ description: "Device interaction via gRPC: lifecycle, recording, log capture"
 
 | File | Description |
 |------|-------------|
+| [android-ios-mirror](android-ios-mirror.md) | The Android/iOS mirror in device-node — AdbClient/SimctlClient, the gRPC setups, the recording and log providers, the discovery probe family: `infra/commandFailure.ts` is the one shared point on the seam, sharing is settled per helper by a measured diff rather than by parallel shape, and per-platform policy (probe `blocking` scope, the Android `sys.boot_completed` gate) keeps its own path. |
 | [log-capture](log-capture.md) | Per-test device log capture: manager, providers, Device integration |

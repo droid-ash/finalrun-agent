@@ -95,22 +95,7 @@ export class RecordingManager implements DeviceRecordingController {
       });
     }
 
-    const explicitOutputPath = params.recordingRequest.outputFilePath
-      ? path.resolve(params.recordingRequest.outputFilePath)
-      : undefined;
-    const recordingDir = explicitOutputPath
-      ? path.dirname(explicitOutputPath)
-      : path.resolve(this._cwdProvider(), provider.recordingFolder);
-    await fsp.mkdir(recordingDir, { recursive: true });
-
-    const sanitizedTestRunId = this._sanitizeForFilename(params.recordingRequest.runId);
-    const sanitizedTestCaseId = this._sanitizeForFilename(
-      params.recordingRequest.testId,
-    );
-    const fallbackFileName =
-      `${sanitizedTestRunId}_${sanitizedTestCaseId}.${provider.fileExtension}`;
-    const filePath = explicitOutputPath ?? path.join(recordingDir, fallbackFileName);
-    const fileName = path.basename(filePath);
+    const { filePath, fileName } = await this._resolveRecordingFile(params, provider);
 
     const recordingInfo = new RecordingInfo({
       deviceId: params.deviceId,
@@ -127,10 +112,47 @@ export class RecordingManager implements DeviceRecordingController {
       mapKey,
     ]);
 
+    return await this._launchRecordingProcess(params, provider, mapKey, recordingInfo);
+  }
+
+  /** Resolve the output file location for a new recording, creating its directory. */
+  private async _resolveRecordingFile(
+    params: RecordingSessionStartParams,
+    provider: RecordingProvider,
+  ): Promise<{ filePath: string; fileName: string }> {
+    const explicitOutputPath = params.recordingRequest.outputFilePath
+      ? path.resolve(params.recordingRequest.outputFilePath)
+      : undefined;
+    const recordingDir = explicitOutputPath
+      ? path.dirname(explicitOutputPath)
+      : path.resolve(this._cwdProvider(), provider.recordingFolder);
+    await fsp.mkdir(recordingDir, { recursive: true });
+
+    const sanitizedTestRunId = this._sanitizeForFilename(params.recordingRequest.runId);
+    const sanitizedTestCaseId = this._sanitizeForFilename(
+      params.recordingRequest.testId,
+    );
+    const fallbackFileName =
+      `${sanitizedTestRunId}_${sanitizedTestCaseId}.${provider.fileExtension}`;
+    const filePath = explicitOutputPath ?? path.join(recordingDir, fallbackFileName);
+    return { filePath, fileName: path.basename(filePath) };
+  }
+
+  /**
+   * Start the provider process for an already-registered recording; on any
+   * failure the registration added by startRecording is rolled back here,
+   * in the same phase that observes the failure.
+   */
+  private async _launchRecordingProcess(
+    params: RecordingSessionStartParams,
+    provider: RecordingProvider,
+    mapKey: string,
+    recordingInfo: RecordingInfo,
+  ): Promise<DeviceNodeResponse> {
     try {
       const providerResult = await provider.startRecordingProcess({
         deviceId: params.deviceId,
-        filePath,
+        filePath: recordingInfo.filePath,
         recordingRequest: params.recordingRequest,
         sdkVersion: params.sdkVersion,
       });
@@ -149,8 +171,8 @@ export class RecordingManager implements DeviceRecordingController {
           providerResult.response.message ??
           `Recording started successfully for test case: ${params.recordingRequest.testId}`,
         data: {
-          fileName,
-          filePath,
+          fileName: recordingInfo.fileName,
+          filePath: recordingInfo.filePath,
           platform: params.platform,
           startedAt: recordingInfo.startTime.toISOString(),
           ...(providerResult.platformMetadata
@@ -179,36 +201,11 @@ export class RecordingManager implements DeviceRecordingController {
   ): Promise<DeviceNodeResponse> {
     const mapKey = this.getMapKey(runId, testId);
 
-    if (this._stoppedTestCases.has(mapKey)) {
-      return new DeviceNodeResponse({
-        success: true,
-        message: 'Recording already stopped for this test case',
-      });
+    const lookup = this._lookupActiveRecording(mapKey, options.platform);
+    if (!lookup.ok) {
+      return lookup.response;
     }
-
-    const process = this._recordingProcessMap.get(mapKey);
-    if (!process) {
-      return new DeviceNodeResponse({
-        success: false,
-        message: 'No active recording found for this test case',
-      });
-    }
-
-    const recordingInfo = this._recordingInfoMap.get(mapKey);
-    if (!recordingInfo) {
-      return new DeviceNodeResponse({
-        success: false,
-        message: 'Recording info not found',
-      });
-    }
-
-    const provider = this._providers.get(options.platform);
-    if (!provider) {
-      return new DeviceNodeResponse({
-        success: false,
-        message: `Screen recording is not configured for platform: ${options.platform}`,
-      });
-    }
+    const { process, recordingInfo, provider } = lookup;
 
     const stopResult = await provider.stopRecordingProcess({
       process,
@@ -226,18 +223,7 @@ export class RecordingManager implements DeviceRecordingController {
     this._finalizeStoppedRecording(mapKey, recordingInfo);
 
     if (options.keepOutput === false) {
-      try {
-        await fsp.rm(recordingInfo.filePath, { force: true });
-      } catch (error) {
-        Logger.w(
-          `RecordingManager: Failed to delete local recording file ${recordingInfo.filePath}: ${this._formatError(error)}`,
-        );
-      }
-
-      return new DeviceNodeResponse({
-        success: true,
-        message: `Recording aborted and cleaned up for test case: ${testId}`,
-      });
+      return await this._discardRecordingOutput(recordingInfo, testId);
     }
 
     return new DeviceNodeResponse({
@@ -249,6 +235,86 @@ export class RecordingManager implements DeviceRecordingController {
         startedAt: recordingInfo.startTime.toISOString(),
         completedAt: recordingInfo.endTime?.toISOString() ?? new Date().toISOString(),
       },
+    });
+  }
+
+  /**
+   * Resolve the process, info, and provider for an active recording;
+   * a ready-made response when there is nothing to stop.
+   */
+  private _lookupActiveRecording(
+    mapKey: string,
+    platform: string,
+  ):
+    | {
+        ok: true;
+        process: ChildProcess;
+        recordingInfo: RecordingInfo;
+        provider: RecordingProvider;
+      }
+    | { ok: false; response: DeviceNodeResponse } {
+    if (this._stoppedTestCases.has(mapKey)) {
+      return {
+        ok: false,
+        response: new DeviceNodeResponse({
+          success: true,
+          message: 'Recording already stopped for this test case',
+        }),
+      };
+    }
+
+    const process = this._recordingProcessMap.get(mapKey);
+    if (!process) {
+      return {
+        ok: false,
+        response: new DeviceNodeResponse({
+          success: false,
+          message: 'No active recording found for this test case',
+        }),
+      };
+    }
+
+    const recordingInfo = this._recordingInfoMap.get(mapKey);
+    if (!recordingInfo) {
+      return {
+        ok: false,
+        response: new DeviceNodeResponse({
+          success: false,
+          message: 'Recording info not found',
+        }),
+      };
+    }
+
+    const provider = this._providers.get(platform);
+    if (!provider) {
+      return {
+        ok: false,
+        response: new DeviceNodeResponse({
+          success: false,
+          message: `Screen recording is not configured for platform: ${platform}`,
+        }),
+      };
+    }
+
+    return { ok: true, process, recordingInfo, provider };
+  }
+
+  /** Delete the recording file after an abort-style stop (keepOutput === false). */
+  private async _discardRecordingOutput(
+    recordingInfo: RecordingInfo,
+    testId: string,
+  ): Promise<DeviceNodeResponse> {
+    try {
+      await fsp.rm(recordingInfo.filePath, { force: true });
+    } catch (error) {
+      Logger.w(
+        `RecordingManager: Failed to delete local recording file ${recordingInfo.filePath}: ${this._formatError(error)}`,
+      );
+    }
+
+    return new DeviceNodeResponse({
+      success: true,
+      message: `Recording aborted and cleaned up for test case: ${testId}`,
     });
   }
 

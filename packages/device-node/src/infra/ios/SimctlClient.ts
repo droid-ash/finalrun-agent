@@ -5,6 +5,7 @@ import {
   Logger,
   type SingleArgument,
 } from '@finalrun/common';
+import { toCommandFailureResult } from '../commandFailure.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -467,41 +468,10 @@ export class SimctlClient {
       const apps: Array<Record<string, unknown>> = [];
 
       for (const [key, value] of Object.entries(parsed)) {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) {
-          continue;
+        const app = this._parseAppRecord(key, value);
+        if (app) {
+          apps.push(app);
         }
-
-        const valueRecord = value as Record<string, unknown>;
-        const bundleId =
-          (valueRecord['CFBundleIdentifier'] as string | undefined)?.trim() ||
-          (valueRecord['bundleIdentifier'] as string | undefined)?.trim() ||
-          (valueRecord['bundleId'] as string | undefined)?.trim() ||
-          key.trim();
-        if (!bundleId) {
-          continue;
-        }
-
-        const fallbackName = key.trim() || bundleId;
-        const name =
-          (valueRecord['CFBundleDisplayName'] as string | undefined)?.trim() ||
-          (valueRecord['CFBundleName'] as string | undefined)?.trim() ||
-          fallbackName;
-        const version =
-          (valueRecord['CFBundleVersion'] as string | undefined)?.trim() ?? null;
-        const applicationType =
-          (valueRecord['ApplicationType'] as string | undefined)?.trim() ??
-          (bundleId.startsWith('com.apple.') ? 'System' : 'User');
-
-        const executableName =
-          (valueRecord['CFBundleExecutable'] as string | undefined)?.trim() ?? null;
-
-        apps.push({
-          bundleId,
-          name,
-          version,
-          applicationType,
-          executableName,
-        });
       }
 
       return {
@@ -517,6 +487,68 @@ export class SimctlClient {
             : `Failed to parse iOS app metadata: ${String(error)}`,
       };
     }
+  }
+
+  /** Parse one `simctl listapps` record into the app-metadata shape; null when it is not an app record. */
+  private _parseAppRecord(
+    key: string,
+    value: unknown,
+  ): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const valueRecord = value as Record<string, unknown>;
+    const bundleId =
+      this._trimmed(valueRecord['CFBundleIdentifier']) ||
+      this._trimmed(valueRecord['bundleIdentifier']) ||
+      this._trimmed(valueRecord['bundleId']) ||
+      key.trim();
+    if (!bundleId) {
+      return null;
+    }
+
+    return { bundleId, ...this._appRecordDetails(valueRecord, key, bundleId) };
+  }
+
+  private _appRecordDetails(
+    valueRecord: Record<string, unknown>,
+    key: string,
+    bundleId: string,
+  ): Record<string, unknown> {
+    const fallbackName = key.trim() || bundleId;
+    const name =
+      this._trimmed(valueRecord['CFBundleDisplayName']) ||
+      this._trimmed(valueRecord['CFBundleName']) ||
+      fallbackName;
+    const version = this._trimmed(valueRecord['CFBundleVersion']) ?? null;
+    const applicationType =
+      this._trimmed(valueRecord['ApplicationType']) ??
+      (bundleId.startsWith('com.apple.') ? 'System' : 'User');
+    const executableName = this._trimmed(valueRecord['CFBundleExecutable']) ?? null;
+
+    return { name, version, applicationType, executableName };
+  }
+
+  /**
+   * Replaces the eight inline `(value as string | undefined)?.trim()` casts.
+   *
+   * Cast semantics are identical, but the *thrown message* is not: if a record
+   * carries a non-string, non-null value (a malformed `Info.plist` with, say,
+   * `CFBundleVersion: 17`), V8 builds the TypeError text from the source
+   * expression, so it now reads `value?.trim is not a function` where the
+   * inline form read `valueRecord.CFBundleVersion?.trim is not a function`.
+   * That string is caught by `_listInstalledAppMetadata` and propagated
+   * verbatim as `message` by `uninstallUserApps` and `isAppInstalled`, so it is
+   * user-reachable. The delta is accepted, not overlooked: the throw class,
+   * throw point, success/failure classification and returned data are all
+   * unchanged, and neither string is a designed diagnostic — both leak an
+   * internal expression name. Preserving the old text is impossible without
+   * re-inlining all eight call sites, which is what put the enclosing method
+   * over the complexity ceiling.
+   */
+  private _trimmed(value: unknown): string | undefined {
+    return (value as string | undefined)?.trim();
   }
 
   private async _applySimctlPermissions(
@@ -580,29 +612,17 @@ export class SimctlClient {
     const permissionNames = Object.keys(permissions);
 
     for (const [permissionName, action] of Object.entries(permissions)) {
-      let translatedValue: string;
-      switch (action) {
-        case 'allow':
-          translatedValue = 'YES';
-          break;
-        case 'deny':
-          translatedValue = 'NO';
-          break;
-        case 'unset':
-          translatedValue = 'unset';
-          break;
-        default:
-          return {
-            success: false,
-            message: `Invalid action for ${permissionName}: ${action}`,
-          };
-      }
-
-      const translatedPermissionName =
-        IOS_APPLESIMUTILS_PERMISSION_NAMES[permissionName] ?? permissionName;
-      translatedPermissions.push(
-        `${translatedPermissionName}=${translatedValue}`,
+      const translated = this._translateApplesimutilsPermission(
+        permissionName,
+        action,
       );
+      if (translated === null) {
+        return {
+          success: false,
+          message: `Invalid action for ${permissionName}: ${action}`,
+        };
+      }
+      translatedPermissions.push(translated);
     }
 
     if (translatedPermissions.length === 0) {
@@ -645,6 +665,34 @@ export class SimctlClient {
         appliedPermissions: permissionNames,
       },
     };
+  }
+
+  /**
+   * Translate one permission/action pair into an applesimutils
+   * `name=value` token; null when the action is invalid.
+   */
+  private _translateApplesimutilsPermission(
+    permissionName: string,
+    action: string,
+  ): string | null {
+    let translatedValue: string;
+    switch (action) {
+      case 'allow':
+        translatedValue = 'YES';
+        break;
+      case 'deny':
+        translatedValue = 'NO';
+        break;
+      case 'unset':
+        translatedValue = 'unset';
+        break;
+      default:
+        return null;
+    }
+
+    const translatedPermissionName =
+      IOS_APPLESIMUTILS_PERMISSION_NAMES[permissionName] ?? permissionName;
+    return `${translatedPermissionName}=${translatedValue}`;
   }
 
   private _mergePermissionResults(
@@ -702,42 +750,12 @@ export class SimctlClient {
         stderr: stderrText,
       };
     } catch (error) {
-      const result = this._toFailureResult(failurePrefix, error);
+      const result = toCommandFailureResult(failurePrefix, error);
       if (!options?.suppressErrorLog) {
         Logger.e(failurePrefix, error);
       }
       return result;
     }
-  }
-
-  private _toFailureResult(
-    failurePrefix: string,
-    error: unknown,
-  ): IOSCommandResult {
-    const stdout =
-      typeof error === 'object' &&
-      error !== null &&
-      'stdout' in error &&
-      (typeof (error as { stdout?: unknown }).stdout === 'string' ||
-        Buffer.isBuffer((error as { stdout?: unknown }).stdout))
-        ? (error as { stdout?: string | Buffer }).stdout?.toString().trim()
-        : '';
-    const stderr =
-      typeof error === 'object' &&
-      error !== null &&
-      'stderr' in error &&
-      (typeof (error as { stderr?: unknown }).stderr === 'string' ||
-        Buffer.isBuffer((error as { stderr?: unknown }).stderr))
-        ? (error as { stderr?: string | Buffer }).stderr?.toString().trim()
-        : '';
-    const errorMessage = stderr || stdout || (error instanceof Error ? error.message : String(error));
-
-    return {
-      success: false,
-      message: `${failurePrefix}: ${errorMessage}`,
-      stdout,
-      stderr,
-    };
   }
 
   private _normalizeButtonName(button: string): string {

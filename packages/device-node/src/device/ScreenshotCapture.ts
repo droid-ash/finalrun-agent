@@ -263,49 +263,21 @@ export class ScreenshotCaptureHelper {
     };
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      logCaptureDetail(
-        {
-          phase: 'capture.final_payload',
-          traceStep,
-          attempt,
-          totalAttempts: maxAttempts,
-        },
-        'requesting screenshot + hierarchy',
-      );
+      const context = this._finalPayloadContext(traceStep, attempt, maxAttempts);
+      logCaptureDetail(context, 'requesting screenshot + hierarchy');
 
       lastAttempt = await captureScreenshotPayload(
         this._grpcClient,
         attempt < maxAttempts ? 'debug' : 'error',
-        {
-          phase: 'capture.final_payload',
-          traceStep,
-          attempt,
-          totalAttempts: maxAttempts,
-        },
+        context,
       );
 
       if (lastAttempt.success || !lastAttempt.transient || attempt === maxAttempts) {
-        lastAttempt = {
-          ...lastAttempt,
-          attempts: attempt,
-          durationMs: roundDuration(performance.now() - startedAt),
-        };
-
-        finishTracePhase(
-          phase,
-          lastAttempt.success ? 'success' : 'failure',
-          `attempts=${attempt} transient=${lastAttempt.transient}${lastAttempt.message ? ` reason=${lastAttempt.message}` : ''}`,
-        );
-        return lastAttempt;
+        return this._finalizeCaptureAttempt(phase, lastAttempt, attempt, startedAt);
       }
 
       logCaptureDetail(
-        {
-          phase: 'capture.final_payload',
-          traceStep,
-          attempt,
-          totalAttempts: maxAttempts,
-        },
+        context,
         `transient failure, retrying in ${SCREENSHOT_CAPTURE_RETRY_DELAY_MS}ms`,
       );
       await delay(SCREENSHOT_CAPTURE_RETRY_DELAY_MS);
@@ -323,6 +295,35 @@ export class ScreenshotCaptureHelper {
     return lastAttempt;
   }
 
+  private _finalPayloadContext(
+    traceStep: number | null | undefined,
+    attempt: number,
+    totalAttempts: number,
+  ): CaptureLogContext {
+    return { phase: 'capture.final_payload', traceStep, attempt, totalAttempts };
+  }
+
+  /** Stamp attempts/duration on the terminal attempt and close the trace phase. */
+  private _finalizeCaptureAttempt(
+    phase: ActiveCapturePhase | null,
+    lastAttempt: CaptureAttemptResult,
+    attempt: number,
+    startedAt: number,
+  ): CaptureAttemptResult {
+    const finalAttempt = {
+      ...lastAttempt,
+      attempts: attempt,
+      durationMs: roundDuration(performance.now() - startedAt),
+    };
+
+    finishTracePhase(
+      phase,
+      finalAttempt.success ? 'success' : 'failure',
+      `attempts=${attempt} transient=${finalAttempt.transient}${finalAttempt.message ? ` reason=${finalAttempt.message}` : ''}`,
+    );
+    return finalAttempt;
+  }
+
   private async _waitForStableScreen(
     traceStep?: number | null,
   ): Promise<StabilityWaitResult> {
@@ -333,63 +334,18 @@ export class ScreenshotCaptureHelper {
 
     while (performance.now() - startedAt < SCREENSHOT_STABILITY_TIMEOUT_MS) {
       pollCount += 1;
-      const rawFetchStartedAt = performance.now();
-      const response = await this._getRawScreenshot(traceStep);
-      const fetchDurationMs = roundDuration(performance.now() - rawFetchStartedAt);
-      const compareStartedAt = performance.now();
-      const currentHash = hashRawScreenshot(response);
-      const comparisonDurationMs = roundDuration(
-        performance.now() - compareStartedAt,
-      );
-      const elapsedMs = roundDuration(performance.now() - startedAt);
-
-      if (currentHash && currentHash === previousHash) {
-        finishTracePhase(
-          phase,
-          'success',
-          `polls=${pollCount} hash=${shortHash(currentHash)}`,
-        );
-        logCaptureDetail(
-          {
-            phase: 'capture.stability',
-            traceStep,
-          },
-          `poll=${pollCount} state=stable hash=${shortHash(currentHash)} elapsed=${elapsedMs}ms fetch=${fetchDurationMs}ms compare=${comparisonDurationMs}ms`,
-        );
-        return {
-          stable: true,
-          durationMs: elapsedMs,
-          pollCount,
-        };
+      const poll = await this._pollScreenStability({
+        traceStep,
+        phase,
+        previousHash,
+        pollCount,
+        startedAt,
+      });
+      if (poll.stable) {
+        return poll.result;
       }
 
-      if (!currentHash) {
-        logCaptureDetail(
-          {
-            phase: 'capture.stability',
-            traceStep,
-          },
-          `poll=${pollCount} state=empty elapsed=${elapsedMs}ms fetch=${fetchDurationMs}ms compare=${comparisonDurationMs}ms`,
-        );
-      } else if (!previousHash) {
-        logCaptureDetail(
-          {
-            phase: 'capture.stability',
-            traceStep,
-          },
-          `poll=${pollCount} state=baseline hash=${shortHash(currentHash)} elapsed=${elapsedMs}ms fetch=${fetchDurationMs}ms compare=${comparisonDurationMs}ms`,
-        );
-      } else {
-        logCaptureDetail(
-          {
-            phase: 'capture.stability',
-            traceStep,
-          },
-          `poll=${pollCount} state=changed previous=${shortHash(previousHash)} current=${shortHash(currentHash)} elapsed=${elapsedMs}ms fetch=${fetchDurationMs}ms compare=${comparisonDurationMs}ms`,
-        );
-      }
-
-      previousHash = currentHash;
+      previousHash = poll.currentHash;
       await delay(SCREENSHOT_STABILITY_POLL_DELAY_MS);
     }
 
@@ -404,6 +360,84 @@ export class ScreenshotCaptureHelper {
       durationMs,
       pollCount,
     };
+  }
+
+  /** One stability poll: fetch, hash, compare against the previous poll, and log the outcome. */
+  private async _pollScreenStability(params: {
+    traceStep: number | null | undefined;
+    phase: ActiveCapturePhase | null;
+    previousHash: string | null;
+    pollCount: number;
+    startedAt: number;
+  }): Promise<
+    | { stable: true; result: StabilityWaitResult }
+    | { stable: false; currentHash: string | null }
+  > {
+    const rawFetchStartedAt = performance.now();
+    const response = await this._getRawScreenshot(params.traceStep);
+    const fetchDurationMs = roundDuration(performance.now() - rawFetchStartedAt);
+    const compareStartedAt = performance.now();
+    const currentHash = hashRawScreenshot(response);
+    const comparisonDurationMs = roundDuration(
+      performance.now() - compareStartedAt,
+    );
+    const elapsedMs = roundDuration(performance.now() - params.startedAt);
+    const timings = `elapsed=${elapsedMs}ms fetch=${fetchDurationMs}ms compare=${comparisonDurationMs}ms`;
+
+    if (currentHash && currentHash === params.previousHash) {
+      finishTracePhase(
+        params.phase,
+        'success',
+        `polls=${params.pollCount} hash=${shortHash(currentHash)}`,
+      );
+      logCaptureDetail(
+        {
+          phase: 'capture.stability',
+          traceStep: params.traceStep,
+        },
+        `poll=${params.pollCount} state=stable hash=${shortHash(currentHash)} ${timings}`,
+      );
+      return {
+        stable: true,
+        result: {
+          stable: true,
+          durationMs: elapsedMs,
+          pollCount: params.pollCount,
+        },
+      };
+    }
+
+    this._logUnstablePoll(params, currentHash, timings);
+    return { stable: false, currentHash };
+  }
+
+  /** Log the not-yet-stable poll outcome (empty / baseline / changed). */
+  private _logUnstablePoll(
+    params: {
+      traceStep: number | null | undefined;
+      previousHash: string | null;
+      pollCount: number;
+    },
+    currentHash: string | null,
+    timings: string,
+  ): void {
+    const context = {
+      phase: 'capture.stability',
+      traceStep: params.traceStep,
+    };
+    if (!currentHash) {
+      logCaptureDetail(context, `poll=${params.pollCount} state=empty ${timings}`);
+    } else if (!params.previousHash) {
+      logCaptureDetail(
+        context,
+        `poll=${params.pollCount} state=baseline hash=${shortHash(currentHash)} ${timings}`,
+      );
+    } else {
+      logCaptureDetail(
+        context,
+        `poll=${params.pollCount} state=changed previous=${shortHash(params.previousHash)} current=${shortHash(currentHash)} ${timings}`,
+      );
+    }
   }
 
   private async _getRawScreenshot(

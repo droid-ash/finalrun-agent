@@ -1,0 +1,53 @@
+id: 6z9b
+name: 260727-6z9b-batch-refactor-device-node
+created: 2026-07-27T03:34:34Z
+created_by: ashish-noon
+change_type: refactor
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: done
+    review-pr: done
+plan:
+    generated: true
+    task_count: 22
+    acceptance_count: 10
+    acceptance_completed: 10
+confidence:
+    certain: 8
+    confident: 2
+    tentative: 0
+    unresolved: 0
+    score: 4.8
+    fuzzy: true
+    dimensions:
+        signal: 83.5
+        reversibility: 79.0
+        competence: 89.0
+        disambiguation: 85.0
+stage_metrics:
+    intake: {started_at: "2026-07-27T03:34:34Z", driver: fab-new, iterations: 1, completed_at: "2026-07-27T04:43:40Z"}
+    apply: {started_at: "2026-07-27T04:43:40Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T05:23:49Z"}
+    review: {started_at: "2026-07-27T05:23:49Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T05:59:54Z"}
+    hydrate: {started_at: "2026-07-27T05:59:54Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T06:06:56Z"}
+    ship: {started_at: "2026-07-27T06:06:56Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T06:09:55Z"}
+    review-pr: {started_at: "2026-07-27T06:09:55Z", driver: git-pr, iterations: 1, completed_at: "2026-07-27T06:21:09Z"}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/160
+change_type_source: explicit
+true_impact:
+    added: 1635
+    deleted: 835
+    net: 800
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-27T06:09:55Z"
+    computed_at_stage: ship
+summary: 'Recorded the device-node Android/iOS mirror rule: sharing is settled per helper by a measured diff, with toCommandFailureResult in infra/commandFailure.ts as the one shared point'
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-27T06:21:09Z
