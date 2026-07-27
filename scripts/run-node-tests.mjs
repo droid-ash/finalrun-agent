@@ -16,8 +16,10 @@
 // consuming packages (common, cloud-core, device-node, goal-executor) from
 // each duplicating the script. Semantics are STRICT: these packages have real
 // tests, so finding zero test files is a build/packaging problem — exit 1,
-// never a silent pass. (Packages with no tests yet use their own tolerant
-// runner instead: packages/report-web/scripts/runTests.mjs.)
+// never a silent pass. (report-web keeps an equally strict package-local
+// runner — packages/report-web/scripts/runTests.mjs — because its tsup+vite
+// build emits no test files to dist/, so it runs src/**/*.test.ts(x) through
+// the tsx loader instead.)
 
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';

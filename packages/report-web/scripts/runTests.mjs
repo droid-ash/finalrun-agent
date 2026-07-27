@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // Run the Node test runner (through the tsx loader) against every
-// src/**/*.test.ts, portably across Node 20.x.
+// src/**/*.test.ts and src/**/*.test.tsx, portably across Node 20.x.
 //
 // We can't rely on `tsx --test src/**/*.test.ts` because glob expansion is
 // left to the shell / node's test runner (native glob support arrived in
 // Node 21) and we declare engines.node >= 20.19.
 //
-// Modeled on packages/cli/scripts/runTests.mjs with one deliberate inversion:
-// this package has ZERO test files today, so "no test files found" prints a
-// notice and exits 0 instead of 1 — otherwise the CI gate
-// (.github/workflows/ci.yml) would go red on every PR for a package that
-// simply has nothing to run yet. A genuine test failure still propagates its
-// real exit code.
+// Semantics are STRICT, matching scripts/run-node-tests.mjs: this package has
+// real tests now, so finding zero test files is a discovery/packaging fault —
+// exit 1, never a silent pass. The runner stays package-local (rather than
+// the shared dist-discovering scripts/run-node-tests.mjs) because report-web
+// builds with tsup + vite, neither of which emits test files to dist/ — tests
+// run from src/ through the tsx loader instead.
 
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
@@ -34,7 +34,7 @@ function findTestFiles(dir) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       out.push(...findTestFiles(full));
-    } else if (entry.endsWith('.test.ts')) {
+    } else if (entry.endsWith('.test.ts') || entry.endsWith('.test.tsx')) {
       out.push(full);
     }
   }
@@ -44,8 +44,8 @@ function findTestFiles(dir) {
 const testFiles = findTestFiles(resolve(pkgDir, 'src'));
 
 if (testFiles.length === 0) {
-  console.log('[runTests] No test files in this package yet — nothing to run.');
-  process.exit(0);
+  console.error('[runTests] No src/**/*.test.ts(x) files found — this package has tests, so zero discovered files is a fault.');
+  process.exit(1);
 }
 
 // `node --import tsx --test` is tsx's documented Node >= 20.6 invocation and

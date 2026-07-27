@@ -2,28 +2,50 @@ id: e5nk
 name: 260727-e5nk-backfill-report-web-logic-tests
 created: 2026-07-27T16:28:17Z
 created_by: ashish-noon
-change_type: feat
+change_type: test
 issues: []
 progress:
-    intake: active
-    apply: pending
-    review: pending
-    hydrate: pending
-    ship: pending
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
     review-pr: pending
 plan:
-    generated: false
-    task_count: 0
-    acceptance_count: 0
-    acceptance_completed: 0
+    generated: true
+    task_count: 14
+    acceptance_count: 19
+    acceptance_completed: 19
 confidence:
-    certain: 0
-    confident: 0
+    certain: 9
+    confident: 1
     tentative: 0
     unresolved: 0
-    score: 0.0
+    score: 5.0
+    fuzzy: true
+    dimensions:
+        signal: 86.0
+        reversibility: 83.5
+        competence: 91.5
+        disambiguation: 88.0
 stage_metrics:
-    intake: {started_at: "2026-07-27T16:28:17Z", driver: fab-new, iterations: 1}
+    intake: {started_at: "2026-07-27T16:28:17Z", driver: fab-new, iterations: 1, completed_at: "2026-07-27T16:40:06Z"}
+    apply: {started_at: "2026-07-27T16:40:06Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T17:00:41Z"}
+    review: {started_at: "2026-07-27T17:00:41Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T17:18:54Z"}
+    hydrate: {started_at: "2026-07-27T17:18:54Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T17:26:43Z"}
+    ship: {started_at: "2026-07-27T17:26:43Z", driver: fab-fff, iterations: 1}
 prs: []
+change_type_source: explicit
+true_impact:
+    added: 32
+    deleted: 0
+    net: 32
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-27T17:26:43Z"
+    computed_at_stage: hydrate
+summary: report-web gains 57 characterization tests and a strict package-local runner (.test.ts + .test.tsx); every workspace test runner is now strict and the tolerant shape is retired; recorded that the CI gate never typechecks and that --if-present silently skips a script-less workspace; renderers.md rewritten to present truth
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-27T16:28:17Z
+last_updated: 2026-07-27T17:26:43Z
