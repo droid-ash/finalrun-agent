@@ -5,17 +5,17 @@ created_by: ashish-noon
 change_type: refactor
 issues: []
 progress:
-    intake: ready
-    apply: pending
-    review: pending
-    hydrate: pending
-    ship: pending
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
     review-pr: pending
 plan:
-    generated: false
-    task_count: 0
-    acceptance_count: 0
-    acceptance_completed: 0
+    generated: true
+    task_count: 17
+    acceptance_count: 16
+    acceptance_completed: 16
 confidence:
     certain: 9
     confident: 1
@@ -29,8 +29,23 @@ confidence:
         competence: 89.0
         disambiguation: 86.0
 stage_metrics:
-    intake: {started_at: "2026-07-26T16:09:41Z", driver: fab-new, iterations: 1}
+    intake: {started_at: "2026-07-26T16:09:41Z", driver: fab-new, iterations: 1, completed_at: "2026-07-27T01:11:08Z"}
+    apply: {started_at: "2026-07-27T01:11:08Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T01:36:43Z"}
+    review: {started_at: "2026-07-27T01:36:43Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T01:57:20Z"}
+    hydrate: {started_at: "2026-07-27T01:57:20Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T02:04:29Z"}
+    ship: {started_at: "2026-07-27T02:04:29Z", driver: fab-fff, iterations: 1}
 prs: []
 change_type_source: explicit
+true_impact:
+    added: 227
+    deleted: 0
+    net: 227
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-27T02:04:29Z"
+    computed_at_stage: hydrate
+summary: Recorded the batched-refactor scoping rule and the differential-harness equivalence proof, and sharpened the phase-outcome DD with the nullable-failure form
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-26T16:11:15Z
+last_updated: 2026-07-27T02:04:29Z
