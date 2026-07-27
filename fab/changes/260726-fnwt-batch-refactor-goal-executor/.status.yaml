@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 17
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-27T01:11:08Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T01:36:43Z"}
     review: {started_at: "2026-07-27T01:36:43Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T01:57:20Z"}
     hydrate: {started_at: "2026-07-27T01:57:20Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T02:04:29Z"}
-    ship: {started_at: "2026-07-27T02:04:29Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-27T02:04:29Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T02:07:45Z"}
+    review-pr: {started_at: "2026-07-27T02:07:45Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/159
 change_type_source: explicit
 true_impact:
-    added: 227
-    deleted: 0
-    net: 227
+    added: 1356
+    deleted: 821
+    net: 535
     tests:
         added: 0
         deleted: 0
         net: 0
-    computed_at: "2026-07-27T02:04:29Z"
-    computed_at_stage: hydrate
+    computed_at: "2026-07-27T02:07:45Z"
+    computed_at_stage: ship
 summary: Recorded the batched-refactor scoping rule and the differential-harness equivalence proof, and sharpened the phase-outcome DD with the nullable-failure form
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-27T02:04:29Z
+last_updated: 2026-07-27T02:07:45Z
