@@ -1,0 +1,11 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-26T15:19:28Z"}
+{"args":"Fix cross-run temp-artifact collisions: finalrun-cloud-/finalrun-app-${Date.now()}.zip use millisecond resolution with no random component, so two concurrent submissions can share a path and one can unlink the other's in-flight upload. Add regression coverage for path uniqueness.","cmd":"fab-new","event":"command","ts":"2026-07-26T15:19:28Z"}
+{"delta":"+5.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-26T15:21:32Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-26T15:33:43Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-26T15:34:46Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-26T15:42:43Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-26T15:53:17Z"}
+{"event":"review","result":"passed","ts":"2026-07-26T15:53:17Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-26T15:58:44Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-26T16:01:41Z"}
+{"event":"review","result":"passed","ts":"2026-07-26T16:08:41Z"}
