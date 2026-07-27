@@ -143,6 +143,9 @@ The refactor MUST proceed one function (or one shared-scaffolding extraction) at
 
 - [x] A-008 R7: `npm run test:workspaces` exit 0, 368 tests, 0 fail — 75 common / 18 cloud-core / 91 device-node / 67 goal-executor / 117 agent
 - [x] A-009 R6: Parser outputs value-identical for every tested input shape; `Map`-based lookup keeps prototype keys falling to the default branch — 463-case differential covering all 14 action types × 13 payload shapes plus 10 prototype-chain names
+- [x] A-009b R4: `_resolveFeatureConfig(FEATURE_PLANNER)` moved from once-per-`plan()` to once-per-attempt (2 calls on retry instead of 1) with no observable difference — 12-case differential over valid and invalid `features.planner.model` overrides, confirming the function is pure and that any `parseModel` throw still fires earlier in `_summarizePlannerRequest`
+
+> **Differential totals reconcile as** 92 (`ActionExecutor`) + 35 (`plan`/`ground`) + 463 (`normalize*`) + 12 (config relocation, A-009b) = **602 comparisons, 0 mismatches**, plus 4 negative controls (span rename, retry-warning separator, fixed-action reason, `ReadonlyMap`→plain object) that all fired, proving the harnesses detect the regression classes at risk. A-009b was initially omitted, which left the acceptance items summing to 590 against a cited 602.
 
 ### Edge Cases & Error Handling
 
