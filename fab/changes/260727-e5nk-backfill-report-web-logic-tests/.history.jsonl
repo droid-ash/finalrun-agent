@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-27T16:28:17Z"}
+{"args":"Close the last zero-coverage package: test report-web's 7 DOM-free logic modules (542 lines) with no new dependencies, and graduate it from the tolerant runner to the strict shared one. Clears no warnings — all 14 report-web warnings are behind a DOM barrier, recorded as a follow-up.","cmd":"fab-new","event":"command","ts":"2026-07-27T16:28:17Z"}
