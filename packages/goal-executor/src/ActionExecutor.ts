@@ -101,6 +101,30 @@ interface GroundToPointResult {
   detail?: string;
 }
 
+/** Every device action the executor can hand to the driver. */
+type ExecutableDeviceAction =
+  | TapAction
+  | LongPressAction
+  | EnterTextAction
+  | ScrollAbsAction
+  | BackAction
+  | HomeAction
+  | RotateAction
+  | HideKeyboardAction
+  | PressKeyAction
+  | LaunchAppAction
+  | DeeplinkAction
+  | SetLocationAction
+  | WaitAction;
+
+/**
+ * Outcome of a non-terminal action phase: either a value the orchestrating
+ * method proceeds with, or the terminal ActionOutput to return as-is.
+ */
+type PhaseOutcome<T> =
+  | { kind: 'proceed'; value: T }
+  | { kind: 'done'; output: ActionOutput };
+
 class TimedActionPhaseFailure extends Error {
   readonly span: SpanTiming;
 
@@ -159,62 +183,10 @@ export class ActionExecutor {
     const llmCalls: LLMCallTrace[] = [];
     let output: ActionOutput;
     try {
-      switch (input.action) {
-        case PLANNER_ACTION_TAP:
-          output = await this._executeTap(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_LONG_PRESS:
-          output = await this._executeLongPress(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_TYPE:
-          output = await this._executeType(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_SCROLL:
-          output = await this._executeScroll(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_BACK:
-          output = await this._executeSimpleAction(input, new BackAction());
-          break;
-
-        case PLANNER_ACTION_HOME:
-          output = await this._executeSimpleAction(input, new HomeAction());
-          break;
-
-        case PLANNER_ACTION_ROTATE:
-          output = await this._executeSingleDevicePhase(input, new RotateAction());
-          break;
-
-        case PLANNER_ACTION_HIDE_KEYBOARD:
-          output = await this._executeSimpleAction(input, new HideKeyboardAction());
-          break;
-
-        case PLANNER_ACTION_PRESS_ENTER:
-          output = await this._executePressEnter(input);
-          break;
-
-        case PLANNER_ACTION_LAUNCH_APP:
-          output = await this._executeLaunchApp(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_SET_LOCATION:
-          output = await this._executeSetLocation(input, llmCalls);
-          break;
-
-        case PLANNER_ACTION_WAIT:
-          output = await this._executeWait(input);
-          break;
-
-        case PLANNER_ACTION_DEEPLINK:
-          output = await this._executeDeeplink(input);
-          break;
-
-        default:
-          output = { success: false, error: `Unknown action: ${input.action}` };
-      }
+      const handler = this._resolveHandler(input.action);
+      output = handler
+        ? await handler(input, llmCalls)
+        : { success: false, error: `Unknown action: ${input.action}` };
     } catch (error) {
       const terminalFailure = terminalFailureFromError(error);
       if (terminalFailure) {
@@ -231,79 +203,71 @@ export class ActionExecutor {
     return output;
   }
 
+  /** Map a planner action string to its handler. Undefined for unknown actions. */
+  private _resolveHandler(
+    action: string,
+  ): ((input: ActionInput, llmCalls: LLMCallTrace[]) => Promise<ActionOutput>) | undefined {
+    const handlers: Record<
+      string,
+      (input: ActionInput, llmCalls: LLMCallTrace[]) => Promise<ActionOutput>
+    > = {
+      [PLANNER_ACTION_TAP]: (input, llmCalls) => this._executeTap(input, llmCalls),
+      [PLANNER_ACTION_LONG_PRESS]: (input, llmCalls) => this._executeLongPress(input, llmCalls),
+      [PLANNER_ACTION_TYPE]: (input, llmCalls) => this._executeType(input, llmCalls),
+      [PLANNER_ACTION_SCROLL]: (input, llmCalls) => this._executeScroll(input, llmCalls),
+      [PLANNER_ACTION_BACK]: (input) => this._executeSimpleAction(input, new BackAction()),
+      [PLANNER_ACTION_HOME]: (input) => this._executeSimpleAction(input, new HomeAction()),
+      [PLANNER_ACTION_ROTATE]: (input) =>
+        this._executeSingleDevicePhase(input, new RotateAction()),
+      [PLANNER_ACTION_HIDE_KEYBOARD]: (input) =>
+        this._executeSimpleAction(input, new HideKeyboardAction()),
+      [PLANNER_ACTION_PRESS_ENTER]: (input) => this._executePressEnter(input),
+      [PLANNER_ACTION_LAUNCH_APP]: (input, llmCalls) => this._executeLaunchApp(input, llmCalls),
+      [PLANNER_ACTION_SET_LOCATION]: (input, llmCalls) =>
+        this._executeSetLocation(input, llmCalls),
+      [PLANNER_ACTION_WAIT]: (input) => this._executeWait(input),
+      [PLANNER_ACTION_DEEPLINK]: (input) => this._executeDeeplink(input),
+    };
+    return Object.prototype.hasOwnProperty.call(handlers, action)
+      ? handlers[action]
+      : undefined;
+  }
+
   private async _executeTap(
     input: ActionInput,
     llmCalls: LLMCallTrace[],
   ): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
 
-    let groundOutcome: GroundToPointResult;
-    try {
-      groundOutcome = await this._groundToPoint(
-        input,
-        FEATURE_GROUNDER,
-        'action.ground',
-        llmCalls,
-      );
-    } catch (error) {
-      return this._failure(spans, error);
+    const grounded = await this._groundTargetPoint(input, 'tap', spans, llmCalls);
+    if (grounded.kind === 'done') {
+      return grounded.output;
     }
 
-    this._pushGroundSpan(spans, 'action.ground', groundOutcome);
-    if (!groundOutcome.result.success || !groundOutcome.result.data) {
-      if (groundOutcome.result.error === 'needsVisualGrounding') {
-        const fallbackResult = await this._executeVisualGroundingFallback(input, 'tap', llmCalls);
-        this._mergeTrace(spans, fallbackResult.trace);
-        if (!fallbackResult.success) {
-          return {
-            success: false,
-            error: fallbackResult.error ?? 'Visual grounding failed',
-            trace: this._buildTrace(spans),
-            terminalFailure: fallbackResult.terminalFailure,
-          };
-        }
-        return this._success(spans);
-      }
-
-      return this._failure(
-        spans,
-        groundOutcome.result.error ?? 'Grounding failed',
-      );
-    }
-
-    const point = groundOutcome.result.data;
+    const point = grounded.value;
     const repeatCount = Math.max(1, input.repeat ?? 1);
     const delayBetweenTapMs = input.delayBetweenTapMs ?? 500;
 
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          for (let index = 0; index < repeatCount; index++) {
-            const action = new TapAction({
-              point: new Point({ x: point.x, y: point.y }),
-            });
-            const result = await this._executeDeviceAction(action, input.traceStep);
-            if (!result.success) {
-              throw new Error(result.error ?? 'Tap action failed');
-            }
+    return this._finishWithDevicePhase(
+      input,
+      spans,
+      async () => {
+        for (let index = 0; index < repeatCount; index++) {
+          const action = new TapAction({
+            point: new Point({ x: point.x, y: point.y }),
+          });
+          await this._runSingleDeviceAction(action, input.traceStep, 'Tap action failed');
 
-            if (index < repeatCount - 1) {
-              await this._delay(delayBetweenTapMs);
-            }
+          if (index < repeatCount - 1) {
+            await this._delay(delayBetweenTapMs);
           }
-        },
-        {
-          successDetail: () =>
-            `repeats=${repeatCount} delayBetweenTapMs=${delayBetweenTapMs}`,
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+        }
+      },
+      {
+        successDetail: () =>
+          `repeats=${repeatCount} delayBetweenTapMs=${delayBetweenTapMs}`,
+      },
+    );
   }
 
   private async _executeLongPress(
@@ -312,6 +276,30 @@ export class ActionExecutor {
   ): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
 
+    const grounded = await this._groundTargetPoint(input, 'longPress', spans, llmCalls);
+    if (grounded.kind === 'done') {
+      return grounded.output;
+    }
+
+    const action = new LongPressAction({
+      point: new Point({ x: grounded.value.x, y: grounded.value.y }),
+    });
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._runSingleDeviceAction(action, input.traceStep, 'Long press action failed'),
+    );
+  }
+
+  /**
+   * Shared preamble for point-targeted actions (tap/longPress): ground the
+   * target element, falling back to visual grounding — which executes the
+   * device action itself — when the grounder requests it.
+   */
+  private async _groundTargetPoint(
+    input: ActionInput,
+    actionType: 'tap' | 'longPress',
+    spans: SpanTiming[],
+    llmCalls: LLMCallTrace[],
+  ): Promise<PhaseOutcome<Point>> {
     let groundOutcome: GroundToPointResult;
     try {
       groundOutcome = await this._groundToPoint(
@@ -321,57 +309,39 @@ export class ActionExecutor {
         llmCalls,
       );
     } catch (error) {
-      return this._failure(spans, error);
+      return { kind: 'done', output: this._failure(spans, error) };
     }
 
     this._pushGroundSpan(spans, 'action.ground', groundOutcome);
-    if (!groundOutcome.result.success || !groundOutcome.result.data) {
-      if (groundOutcome.result.error === 'needsVisualGrounding') {
-        const fallbackResult = await this._executeVisualGroundingFallback(
-          input,
-          'longPress',
-          llmCalls,
-        );
-        this._mergeTrace(spans, fallbackResult.trace);
-        if (!fallbackResult.success) {
-          return {
+    if (groundOutcome.result.success && groundOutcome.result.data) {
+      return { kind: 'proceed', value: groundOutcome.result.data };
+    }
+
+    if (groundOutcome.result.error === 'needsVisualGrounding') {
+      const fallbackResult = await this._executeVisualGroundingFallback(
+        input,
+        actionType,
+        llmCalls,
+      );
+      this._mergeTrace(spans, fallbackResult.trace);
+      if (!fallbackResult.success) {
+        return {
+          kind: 'done',
+          output: {
             success: false,
             error: fallbackResult.error ?? 'Visual grounding failed',
             trace: this._buildTrace(spans),
             terminalFailure: fallbackResult.terminalFailure,
-          };
-        }
-        return this._success(spans);
+          },
+        };
       }
-
-      return this._failure(
-        spans,
-        groundOutcome.result.error ?? 'Grounding failed',
-      );
+      return { kind: 'done', output: this._success(spans) };
     }
 
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const action = new LongPressAction({
-            point: new Point({
-              x: groundOutcome.result.data!.x,
-              y: groundOutcome.result.data!.y,
-            }),
-          });
-          const result = await this._executeDeviceAction(action, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Long press action failed');
-          }
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    return {
+      kind: 'done',
+      output: this._failure(spans, groundOutcome.result.error ?? 'Grounding failed'),
+    };
   }
 
   private async _executeType(
@@ -382,27 +352,26 @@ export class ActionExecutor {
 
     let textToType = '';
     let rawTextToType = '';
-    try {
-      const prepPhase = await this._runTimedPhase(
-        input,
-        'action.prep',
-        async () => {
-          const textMatch =
-            input.reason.match(/"([^"]*)"/) ??
-            input.reason.match(/'([^']*)'/);
-          rawTextToType = input.text ?? (textMatch ? textMatch[1] : input.reason);
-          textToType = this._runtimeBindings
-            ? resolveRuntimePlaceholders(rawTextToType, this._runtimeBindings)
-            : rawTextToType;
-        },
-        {
-          successDetail: () =>
-            `textLength=${rawTextToType.length} clearText=${input.clearText ?? true}`,
-        },
-      );
-      spans.push(prepPhase.span);
-    } catch (error) {
-      return this._failure(spans, error);
+    const prepFailure = await this._runSpanPhase(
+      input,
+      spans,
+      'action.prep',
+      async () => {
+        const textMatch =
+          input.reason.match(/"([^"]*)"/) ??
+          input.reason.match(/'([^']*)'/);
+        rawTextToType = input.text ?? (textMatch ? textMatch[1] : input.reason);
+        textToType = this._runtimeBindings
+          ? resolveRuntimePlaceholders(rawTextToType, this._runtimeBindings)
+          : rawTextToType;
+      },
+      {
+        successDetail: () =>
+          `textLength=${rawTextToType.length} clearText=${input.clearText ?? true}`,
+      },
+    );
+    if (prepFailure) {
+      return prepFailure;
     }
 
     let focusOutcome: GroundToPointResult;
@@ -425,40 +394,34 @@ export class ActionExecutor {
       );
     }
 
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          if (focusOutcome.result.data !== null && focusOutcome.result.data !== undefined) {
-            const tapAction = new TapAction({
-              point: new Point({
-                x: focusOutcome.result.data.x,
-                y: focusOutcome.result.data.y,
-              }),
-            });
-            const tapResult = await this._executeDeviceAction(tapAction, input.traceStep);
-            if (!tapResult.success) {
-              throw new Error(tapResult.error ?? 'Failed to focus input field');
-            }
-            await this._delay(300);
-          }
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._typeTextOnDevice(input, focusOutcome.result.data, textToType),
+    );
+  }
 
-          const action = new EnterTextAction({
-            value: textToType,
-            shouldEraseText: input.clearText ?? true,
-          });
-          const response = await this._executeDeviceAction(action, input.traceStep);
-          if (!response.success) {
-            throw new Error(response.error ?? 'Failed to enter text');
-          }
-        },
+  /** Focus the input field when a point was grounded, then enter the text. */
+  private async _typeTextOnDevice(
+    input: ActionInput,
+    focusPoint: Point | null | undefined,
+    textToType: string,
+  ): Promise<void> {
+    if (focusPoint !== null && focusPoint !== undefined) {
+      const tapAction = new TapAction({
+        point: new Point({ x: focusPoint.x, y: focusPoint.y }),
+      });
+      await this._runSingleDeviceAction(
+        tapAction,
+        input.traceStep,
+        'Failed to focus input field',
       );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
+      await this._delay(300);
     }
+
+    const action = new EnterTextAction({
+      value: textToType,
+      shouldEraseText: input.clearText ?? true,
+    });
+    await this._runSingleDeviceAction(action, input.traceStep, 'Failed to enter text');
   }
 
   private async _executeScroll(
@@ -513,22 +476,9 @@ export class ActionExecutor {
       );
     }
 
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const result = await this._executeDeviceAction(scrollResult.data!, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Scroll action failed');
-          }
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._runSingleDeviceAction(scrollResult.data!, input.traceStep, 'Scroll action failed'),
+    );
   }
 
   private async _executePressEnter(input: ActionInput): Promise<ActionOutput> {
@@ -543,79 +493,61 @@ export class ActionExecutor {
     const spans: SpanTiming[] = [];
     let apps: Array<{ packageName: string; name: string }> = [];
 
-    try {
-      const prepPhase = await this._runTimedPhase(
-        input,
-        'action.prep',
-        async () => {
-          const appListResponse = await this._agent.executeAction(
-            new DeviceActionRequest({
-              requestId: uuidv4(),
-              action: new GetAppListAction(),
-              timeout: 10,
-              traceStep: input.traceStep,
-            }),
-          );
-          if (!appListResponse.success) {
-            throw new Error(appListResponse.message ?? 'Failed to load installed apps');
-          }
-
-          apps = appListResponse.data
-            ? ((appListResponse.data['apps'] as Array<{ packageName: string; name: string }>) ?? [])
-            : [];
-        },
-        {
-          successDetail: () => `appCount=${apps.length}`,
-        },
-      );
-      spans.push(prepPhase.span);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
-
-    let grounderResponse;
-    try {
-      grounderResponse = await this._callGrounder(
-        input,
-        {
-          feature: FEATURE_LAUNCH_APP_GROUNDER,
-          act: input.reason,
-          platform: this._platform,
-          availableApps: apps,
-        },
-        llmCalls,
-      );
-    } catch (error) {
-      return this._failure(spans, error);
-    }
-
-    const output = grounderResponse.output;
-    const packageName = output['packageName'] as string;
-    const grounderError =
-      output['isError']
-        ? (output['reason'] as string) ?? 'Launch app grounder failed'
-        : !packageName
-          ? 'Launch app grounder did not return packageName'
-          : undefined;
-
-    spans.push(
-      this._llmTraceToSpan(
-        'action.ground',
-        grounderResponse.trace,
-        grounderError ? 'failure' : 'success',
-        this._groundTraceDetail(
-          grounderResponse.trace,
-          FEATURE_LAUNCH_APP_GROUNDER,
-          grounderError,
-        ),
-      ),
+    const prepFailure = await this._runSpanPhase(
+      input,
+      spans,
+      'action.prep',
+      async () => {
+        apps = await this._fetchInstalledApps(input);
+      },
+      {
+        successDetail: () => `appCount=${apps.length}`,
+      },
     );
-
-    if (grounderError) {
-      return this._failure(spans, grounderError);
+    if (prepFailure) {
+      return prepFailure;
     }
 
-    const action = new LaunchAppAction({
+    const grounded = await this._groundStructuredOutput(
+      input,
+      spans,
+      llmCalls,
+      {
+        feature: FEATURE_LAUNCH_APP_GROUNDER,
+        act: input.reason,
+        platform: this._platform,
+        availableApps: apps,
+      },
+      (output) =>
+        output['isError']
+          ? (output['reason'] as string) ?? 'Launch app grounder failed'
+          : !output['packageName']
+            ? 'Launch app grounder did not return packageName'
+            : undefined,
+    );
+    if (grounded.kind === 'done') {
+      return grounded.output;
+    }
+
+    const packageName = grounded.value['packageName'] as string;
+    const action = this._buildLaunchAppAction(grounded.value, packageName);
+
+    return this._finishWithDevicePhase(
+      input,
+      spans,
+      () => this._runSingleDeviceAction(action, input.traceStep, 'Launch app action failed'),
+      {
+        successDetail: () => `package=${packageName}`,
+      },
+    );
+  }
+
+  /** Build the LaunchAppAction from the grounder output, applying defaults. */
+  private _buildLaunchAppAction(
+    output: Record<string, unknown>,
+    packageName: string,
+  ): LaunchAppAction {
+    return new LaunchAppAction({
       appUpload: new AppUpload({ id: '', platform: this._platform, packageName }),
       allowAllPermissions: readOptionalBoolean(output, 'allowAllPermissions') ?? true,
       shouldUninstallBeforeLaunch:
@@ -625,26 +557,27 @@ export class ActionExecutor {
       stopAppBeforeLaunch: readOptionalBoolean(output, 'stopAppBeforeLaunch') ?? false,
       permissions: (output['permissions'] as Record<string, string>) ?? {},
     });
+  }
 
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const result = await this._executeDeviceAction(action, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Launch app action failed');
-          }
-        },
-        {
-          successDetail: () => `package=${packageName}`,
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
+  /** Load the installed-app list from the device, throwing on driver failure. */
+  private async _fetchInstalledApps(
+    input: ActionInput,
+  ): Promise<Array<{ packageName: string; name: string }>> {
+    const appListResponse = await this._agent.executeAction(
+      new DeviceActionRequest({
+        requestId: uuidv4(),
+        action: new GetAppListAction(),
+        timeout: 10,
+        traceStep: input.traceStep,
+      }),
+    );
+    if (!appListResponse.success) {
+      throw new Error(appListResponse.message ?? 'Failed to load installed apps');
     }
+
+    return appListResponse.data
+      ? ((appListResponse.data['apps'] as Array<{ packageName: string; name: string }>) ?? [])
+      : [];
   }
 
   private async _executeSetLocation(
@@ -652,91 +585,99 @@ export class ActionExecutor {
     llmCalls: LLMCallTrace[],
   ): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
-    let grounderResponse;
 
+    const grounded = await this._groundStructuredOutput(
+      input,
+      spans,
+      llmCalls,
+      {
+        feature: FEATURE_SET_LOCATION_GROUNDER,
+        act: input.reason,
+      },
+      (output) =>
+        output['isError']
+          ? (output['reason'] as string) ?? 'Set location grounder failed'
+          : !output['lat'] || !output['long']
+            ? 'Set location grounder did not return coordinates'
+            : undefined,
+    );
+    if (grounded.kind === 'done') {
+      return grounded.output;
+    }
+
+    const lat = grounded.value['lat'] as string;
+    const long = grounded.value['long'] as string;
+    const action = new SetLocationAction({ lat: lat.trim(), long: long.trim() });
+    return this._finishWithDevicePhase(
+      input,
+      spans,
+      () => this._runSingleDeviceAction(action, input.traceStep, 'Set location action failed'),
+      {
+        successDetail: () => `lat=${lat.trim()} long=${long.trim()}`,
+      },
+    );
+  }
+
+  /**
+   * Shared preamble for grounders whose raw output is consumed directly
+   * (launchApp/setLocation): call the grounder, validate its output, and
+   * record the ground span. `validate` returns the grounder error, if any.
+   */
+  private async _groundStructuredOutput(
+    input: ActionInput,
+    spans: SpanTiming[],
+    llmCalls: LLMCallTrace[],
+    request: {
+      feature: FeatureName;
+      act: string;
+      platform?: string;
+      availableApps?: Array<{ packageName: string; name: string }>;
+    },
+    validate: (output: Record<string, unknown>) => string | undefined,
+  ): Promise<PhaseOutcome<Record<string, unknown>>> {
+    let grounderResponse;
     try {
-      grounderResponse = await this._callGrounder(
-        input,
-        {
-          feature: FEATURE_SET_LOCATION_GROUNDER,
-          act: input.reason,
-        },
-        llmCalls,
-      );
+      grounderResponse = await this._callGrounder(input, request, llmCalls);
     } catch (error) {
-      return this._failure(spans, error);
+      return { kind: 'done', output: this._failure(spans, error) };
     }
 
     const output = grounderResponse.output;
-    const lat = output['lat'] as string;
-    const long = output['long'] as string;
-    const grounderError =
-      output['isError']
-        ? (output['reason'] as string) ?? 'Set location grounder failed'
-        : !lat || !long
-          ? 'Set location grounder did not return coordinates'
-          : undefined;
+    const grounderError = validate(output);
 
     spans.push(
       this._llmTraceToSpan(
         'action.ground',
         grounderResponse.trace,
         grounderError ? 'failure' : 'success',
-        this._groundTraceDetail(
-          grounderResponse.trace,
-          FEATURE_SET_LOCATION_GROUNDER,
-          grounderError,
-        ),
+        this._groundTraceDetail(grounderResponse.trace, request.feature, grounderError),
       ),
     );
 
     if (grounderError) {
-      return this._failure(spans, grounderError);
+      return { kind: 'done', output: this._failure(spans, grounderError) };
     }
 
-    const action = new SetLocationAction({ lat: lat.trim(), long: long.trim() });
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const result = await this._executeDeviceAction(action, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Set location action failed');
-          }
-        },
-        {
-          successDetail: () => `lat=${lat.trim()} long=${long.trim()}`,
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    return { kind: 'proceed', value: output };
   }
 
   private async _executeWait(input: ActionInput): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
     const durationSeconds = input.durationSeconds ?? 3;
 
-    try {
-      const waitPhase = await this._runTimedPhase(
-        input,
-        'action.wait',
-        async () => {
-          Logger.d(`Waiting ${durationSeconds} seconds...`);
-          await this._delay(Math.max(0, Math.round(durationSeconds * 1000)));
-        },
-        {
-          successDetail: () => `duration=${durationSeconds}s`,
-        },
-      );
-      spans.push(waitPhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    const failure = await this._runSpanPhase(
+      input,
+      spans,
+      'action.wait',
+      async () => {
+        Logger.d(`Waiting ${durationSeconds} seconds...`);
+        await this._delay(Math.max(0, Math.round(durationSeconds * 1000)));
+      },
+      {
+        successDetail: () => `duration=${durationSeconds}s`,
+      },
+    );
+    return failure ?? this._success(spans);
   }
 
   private async _executeDeeplink(input: ActionInput): Promise<ActionOutput> {
@@ -744,48 +685,34 @@ export class ActionExecutor {
     let deeplink = '';
     let rawDeeplink = '';
 
-    try {
-      const prepPhase = await this._runTimedPhase(
-        input,
-        'action.prep',
-        async () => {
-          rawDeeplink =
-            input.url ??
-            input.reason.match(/(https?:\/\/\S+|[a-zA-Z][a-zA-Z0-9+.-]*:\/\/\S+)/)?.[1] ??
-            '';
-          if (!rawDeeplink) {
-            throw new Error('Could not extract deeplink URL from reason');
-          }
-          deeplink = this._runtimeBindings
-            ? resolveRuntimePlaceholders(rawDeeplink, this._runtimeBindings)
-            : rawDeeplink;
-        },
-        {
-          successDetail: () => `url=${rawDeeplink}`,
-        },
-      );
-      spans.push(prepPhase.span);
-    } catch (error) {
-      return this._failure(spans, error);
+    const prepFailure = await this._runSpanPhase(
+      input,
+      spans,
+      'action.prep',
+      async () => {
+        rawDeeplink =
+          input.url ??
+          input.reason.match(/(https?:\/\/\S+|[a-zA-Z][a-zA-Z0-9+.-]*:\/\/\S+)/)?.[1] ??
+          '';
+        if (!rawDeeplink) {
+          throw new Error('Could not extract deeplink URL from reason');
+        }
+        deeplink = this._runtimeBindings
+          ? resolveRuntimePlaceholders(rawDeeplink, this._runtimeBindings)
+          : rawDeeplink;
+      },
+      {
+        successDetail: () => `url=${rawDeeplink}`,
+      },
+    );
+    if (prepFailure) {
+      return prepFailure;
     }
 
     const action = new DeeplinkAction({ deeplink });
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const result = await this._executeDeviceAction(action, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Deeplink action failed');
-          }
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._runSingleDeviceAction(action, input.traceStep, 'Deeplink action failed'),
+    );
   }
 
   private async _executeSimpleAction(
@@ -797,37 +724,55 @@ export class ActionExecutor {
 
   private async _executeSingleDevicePhase(
     input: ActionInput,
-    action:
-      | TapAction
-      | LongPressAction
-      | EnterTextAction
-      | ScrollAbsAction
-      | BackAction
-      | HomeAction
-      | RotateAction
-      | HideKeyboardAction
-      | PressKeyAction
-      | LaunchAppAction
-      | DeeplinkAction
-      | SetLocationAction
-      | WaitAction,
+    action: ExecutableDeviceAction,
   ): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._runSingleDeviceAction(action, input.traceStep, 'Device action failed'),
+    );
+  }
+
+  /**
+   * Run a timed phase and record its span. Returns the terminal failure
+   * ActionOutput when the phase throws, or undefined when the caller should
+   * proceed to the next phase.
+   */
+  private async _runSpanPhase(
+    input: ActionInput,
+    spans: SpanTiming[],
+    name: string,
+    fn: () => Promise<void>,
+    options?: { successDetail?: () => string },
+  ): Promise<ActionOutput | undefined> {
     try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const result = await this._executeDeviceAction(action, input.traceStep);
-          if (!result.success) {
-            throw new Error(result.error ?? 'Device action failed');
-          }
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
+      const phase = await this._runTimedPhase(input, name, fn, options);
+      spans.push(phase.span);
+      return undefined;
     } catch (error) {
       return this._failure(spans, error);
+    }
+  }
+
+  /** Run the terminal 'action.device' phase and resolve the action outcome. */
+  private async _finishWithDevicePhase(
+    input: ActionInput,
+    spans: SpanTiming[],
+    run: () => Promise<void>,
+    options?: { successDetail?: () => string },
+  ): Promise<ActionOutput> {
+    const failure = await this._runSpanPhase(input, spans, 'action.device', run, options);
+    return failure ?? this._success(spans);
+  }
+
+  /** Execute one device action, throwing when the driver reports failure. */
+  private async _runSingleDeviceAction(
+    action: ExecutableDeviceAction,
+    traceStep: number | undefined,
+    failureMessage: string,
+  ): Promise<void> {
+    const result = await this._executeDeviceAction(action, traceStep);
+    if (!result.success) {
+      throw new Error(result.error ?? failureMessage);
     }
   }
 
@@ -889,12 +834,45 @@ export class ActionExecutor {
       };
     }
 
+    const phase = await this._runVisualGroundPhase(input, spans, llmCalls);
+    if (phase.kind === 'done') {
+      return phase.output;
+    }
+
+    const result = phase.value;
+    if (!result.success || result.x === undefined || result.y === undefined) {
+      return {
+        success: false,
+        error: `Visual grounding failed: ${result.reason}`,
+        trace: this._buildTrace(spans),
+      };
+    }
+
+    const point = new Point({ x: result.x, y: result.y });
+    const action = actionType === 'longPress'
+      ? new LongPressAction({ point })
+      : new TapAction({ point });
+
+    return this._finishWithDevicePhase(input, spans, () =>
+      this._runSingleDeviceAction(action, input.traceStep, `${actionType} action failed`),
+    );
+  }
+
+  /**
+   * Call the visual grounder and record its span. Returns the raw grounder
+   * result — the caller decides whether the located point is usable.
+   */
+  private async _runVisualGroundPhase(
+    input: ActionInput,
+    spans: SpanTiming[],
+    llmCalls: LLMCallTrace[],
+  ): Promise<PhaseOutcome<Awaited<ReturnType<VisualGrounder['ground']>>>> {
     const startedAt = nowMs();
     let result: Awaited<ReturnType<VisualGrounder['ground']>>;
     try {
       result = await this._visualGrounder.ground({
         act: input.reason,
-        screenshot: input.screenshot,
+        screenshot: input.screenshot!,
         platform: this._platform,
         traceStep: input.traceStep,
         logContext: this._logContext,
@@ -906,19 +884,17 @@ export class ActionExecutor {
       const message = this._redactRuntimeString(
         error instanceof Error ? error.message : String(error),
       );
-      return this._failure(
-        spans,
-        new TimedActionPhaseFailure(
-          message ?? 'Visual grounding failed',
-          {
-            name: 'action.visual_fallback',
-            durationMs: roundDuration(nowMs() - startedAt),
-            status: 'failure',
-            detail: message,
-          },
-          error,
-        ),
+      const failure = new TimedActionPhaseFailure(
+        message ?? 'Visual grounding failed',
+        {
+          name: 'action.visual_fallback',
+          durationMs: roundDuration(nowMs() - startedAt),
+          status: 'failure',
+          detail: message,
+        },
+        error,
       );
+      return { kind: 'done', output: this._failure(spans, failure) };
     }
 
     spans.push(
@@ -937,51 +913,11 @@ export class ActionExecutor {
       ),
     );
 
-    if (!result.success || result.x === undefined || result.y === undefined) {
-      return {
-        success: false,
-        error: `Visual grounding failed: ${result.reason}`,
-        trace: this._buildTrace(spans),
-      };
-    }
-
-    const point = new Point({ x: result.x, y: result.y });
-    const action = actionType === 'longPress'
-      ? new LongPressAction({ point })
-      : new TapAction({ point });
-
-    try {
-      const devicePhase = await this._runTimedPhase(
-        input,
-        'action.device',
-        async () => {
-          const response = await this._executeDeviceAction(action, input.traceStep);
-          if (!response.success) {
-            throw new Error(response.error ?? `${actionType} action failed`);
-          }
-        },
-      );
-      spans.push(devicePhase.span);
-      return this._success(spans);
-    } catch (error) {
-      return this._failure(spans, error);
-    }
+    return { kind: 'proceed', value: result };
   }
 
   private async _executeDeviceAction(
-    action:
-      | TapAction
-      | LongPressAction
-      | EnterTextAction
-      | ScrollAbsAction
-      | BackAction
-      | HomeAction
-      | HideKeyboardAction
-      | PressKeyAction
-      | LaunchAppAction
-      | DeeplinkAction
-      | SetLocationAction
-      | WaitAction,
+    action: ExecutableDeviceAction,
     traceStep?: number,
   ): Promise<ActionOutput> {
     const response = await this._agent.executeAction(

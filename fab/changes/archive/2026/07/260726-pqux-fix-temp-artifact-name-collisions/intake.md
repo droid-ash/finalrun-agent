@@ -10,8 +10,8 @@ Eighth change in the code-quality initiative, and a direct follow-up to
 first follow-up.
 
 The bug was found **empirically, not by inspection**: while instrumenting `fs.unlinkSync` to verify
-#157's leak fix across seven exit paths, the review stage **hit a real same-millisecond collision** —
-one run's temp zip clobbered an identically-named leftover and then unlinked it. CodeRabbit
+PR #157's leak fix across seven exit paths, the review stage **hit a real same-millisecond
+collision** — one run's temp zip clobbered an identically-named leftover and then unlinked it. CodeRabbit
 independently raised the same concern on PR #157, asking for a collision-resistant name or
 concurrency coverage. It was deferred there because it is a distinct latent bug that predates that
 change, and closing it would have widened a scoped leak fix into a second one.
@@ -180,7 +180,7 @@ prefix-keying note, which stays accurate.
 | 6 | Certain | Stub `Date.now` in the regression test | Makes the collision deterministic; without it the test usually reproduces but can pass spuriously — green on broken code, the worst flake direction | S:90 R:85 A:95 D:90 |
 | 7 | Certain | The test MUST fail pre-fix | Same proof obligation as #155 and #157; a concurrency test that passes on broken code is worse than none | S:90 R:85 A:95 D:95 |
 | 8 | Certain | Preserve #157's cleanup structure exactly | It was verified across seven exit paths by instrumenting `unlinkSync`; this change must not disturb it | S:90 R:75 A:95 D:90 |
-| 9 | Confident | The uploaded `filename` is unaffected | `zipAppBundle` returns `filename: \`${basename}.zip\``, derived from the bundle name, not the temp path — but confirm against the existing `appFilename` assertion rather than assuming | S:80 R:85 A:85 D:85 |
+| 9 | Confident | The uploaded `filename` is unaffected | `zipAppBundle` returns a `filename` of `${basename}.zip`, derived from the bundle name, not the temp path — but confirm against the existing `appFilename` assertion rather than assuming | S:80 R:85 A:85 D:85 |
 | 10 | Certain | The memory update is REQUIRED | `pr-quality-gate.md` documents the collision as present behaviour and calls uniqueness an unreachable gap; this change falsifies both | S:90 R:85 A:95 D:95 |
 
 10 assumptions (7 certain, 3 confident, 0 tentative, 0 unresolved).

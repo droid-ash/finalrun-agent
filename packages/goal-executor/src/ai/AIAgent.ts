@@ -135,6 +135,19 @@ export interface GrounderResponse {
 
 type JsonRecord = Record<string, unknown>;
 type LLMPhase = 'planner' | 'grounder';
+/** One part of the user message sent to the LLM. */
+type UserPart = { type: 'text'; text: string } | { type: 'image'; image: string };
+
+/** Mutable per-call timing context threaded through the attempt-phase helpers. */
+interface LLMCallTimings {
+  llmMs: number;
+  parseMs: number;
+}
+
+/** Outcome of one attempt stage: a value to proceed with, or a retryable failure. */
+type LLMAttemptOutcome<T> =
+  | { kind: 'ok'; value: T }
+  | { kind: 'failed'; stage: 'llm' | 'parse'; error: unknown };
 /**
  * Provider-specific options, keyed by provider id.
  *
@@ -217,8 +230,163 @@ export class AIAgent {
   async plan(request: PlannerRequest): Promise<PlannerResponse> {
     const promptBuildStartedAt = performance.now();
     const systemPrompt = this._loadPrompt('planner');
+    const { userParts, textPrompt } = this._buildPlannerPrompt(request);
+    const promptBuildMs = roundDuration(performance.now() - promptBuildStartedAt);
 
-    const userParts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string }> = [];
+    // Input visibility: one INFO summary line + one DEBUG detail blob per plan call.
+    Logger.i(this._summarizePlannerRequest(request));
+    Logger.d(this._detailPlannerRequest(request, textPrompt));
+
+    const timings: LLMCallTimings = { llmMs: 0, parseMs: 0 };
+    let lastLLMCall: LLMCallTrace | undefined;
+
+    const parsedResponse = await this._retryLLMAttempts<PlannerResponse>(
+      { name: 'Planner', suffix: '' },
+      'Planner failed after all retry attempts',
+      async (attempt, maxAttempts) => {
+        const llmOutcome = await this._runPlannerLLMPhase(
+          request,
+          systemPrompt,
+          userParts,
+          attempt,
+          maxAttempts,
+          promptBuildMs,
+          timings,
+        );
+        if (llmOutcome.kind === 'failed') {
+          return llmOutcome;
+        }
+        lastLLMCall = llmOutcome.value.llmCall;
+        return this._runPlannerParsePhase(request, llmOutcome.value, attempt, maxAttempts, timings);
+      },
+    );
+
+    if (request.traceStep !== undefined) {
+      Logger.i(formatPlannerReasoning({
+        step: request.traceStep,
+        thought: parsedResponse.thought,
+        action: parsedResponse.act,
+        reason: parsedResponse.reason,
+      }));
+    }
+
+    return {
+      ...parsedResponse,
+      trace: {
+        totalMs: promptBuildMs + timings.llmMs + timings.parseMs,
+        promptBuildMs,
+        llmMs: timings.llmMs,
+        parseMs: timings.parseMs,
+      },
+      ...(lastLLMCall ? { llmCall: lastLLMCall } : {}),
+    };
+  }
+
+  /**
+   * Shared retry engine for plan/ground: runs up to MAX_LLM_ATTEMPTS attempts,
+   * logging a retry warning between attempts and rethrowing the last error when
+   * attempts are exhausted. A FatalProviderError thrown by an attempt propagates
+   * immediately (no retry).
+   */
+  private async _retryLLMAttempts<T>(
+    label: { name: string; suffix: string },
+    exhaustedMessage: string,
+    runAttempt: (attempt: number, maxAttempts: number) => Promise<LLMAttemptOutcome<T>>,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
+      const outcome = await runAttempt(attempt, MAX_LLM_ATTEMPTS);
+      if (outcome.kind === 'ok') {
+        return outcome.value;
+      }
+      lastError = outcome.error;
+      if (attempt >= MAX_LLM_ATTEMPTS) {
+        throw outcome.error;
+      }
+      Logger.w(
+        `${label.name} attempt ${attempt}/${MAX_LLM_ATTEMPTS} failed (${outcome.stage})${label.suffix}, retrying: ${
+          outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+        }`,
+      );
+    }
+    throw lastError ?? new Error(exhaustedMessage);
+  }
+
+  /** Run one planner LLM call inside its 'planning.llm' trace phase. */
+  private async _runPlannerLLMPhase(
+    request: PlannerRequest,
+    systemPrompt: string,
+    userParts: UserPart[],
+    attempt: number,
+    maxAttempts: number,
+    promptBuildMs: number,
+    timings: LLMCallTimings,
+  ): Promise<LLMAttemptOutcome<{ output: unknown; text: string; llmCall?: LLMCallTrace }>> {
+    const plannerResolved = this._resolveFeatureConfig(FEATURE_PLANNER);
+    const llmPhase = startTracePhase(
+      request.traceStep,
+      'planning.llm',
+      `provider=${plannerResolved.provider} model=${plannerResolved.modelName} attempt=${attempt}/${maxAttempts}`,
+    );
+    const llmStartedAt = performance.now();
+
+    try {
+      const llmResult = await this._callLLM(systemPrompt, userParts, FEATURE_PLANNER);
+      timings.llmMs = roundDuration(performance.now() - llmStartedAt);
+      finishTracePhase(
+        llmPhase,
+        'success',
+        describeLLMTrace({ promptBuildMs, llmMs: timings.llmMs }),
+      );
+      return { kind: 'ok', value: llmResult };
+    } catch (error) {
+      finishTracePhase(
+        llmPhase,
+        'failure',
+        error instanceof Error ? error.message : String(error),
+      );
+      if (FatalProviderError.isInstance(error)) {
+        throw error;
+      }
+      return { kind: 'failed', stage: 'llm', error };
+    }
+  }
+
+  /** Parse one planner response inside its 'planning.parse' trace phase. */
+  private _runPlannerParsePhase(
+    request: PlannerRequest,
+    llmResult: { output: unknown; text: string },
+    attempt: number,
+    maxAttempts: number,
+    timings: LLMCallTimings,
+  ): LLMAttemptOutcome<PlannerResponse> {
+    const parsePhase = startTracePhase(
+      request.traceStep,
+      'planning.parse',
+      `attempt=${attempt}/${maxAttempts}`,
+    );
+    const parseStartedAt = performance.now();
+    try {
+      const parsed = this._parsePlannerResponse(llmResult.output, llmResult.text);
+      timings.parseMs = roundDuration(performance.now() - parseStartedAt);
+      finishTracePhase(parsePhase, 'success');
+      return { kind: 'ok', value: parsed };
+    } catch (error) {
+      finishTracePhase(
+        parsePhase,
+        'failure',
+        error instanceof Error ? error.message : String(error),
+      );
+      return { kind: 'failed', stage: 'parse', error };
+    }
+  }
+
+  /** Assemble the planner user-message parts and text prompt. */
+  private _buildPlannerPrompt(request: PlannerRequest): {
+    userParts: UserPart[];
+    textPrompt: string;
+  } {
+    const userParts: UserPart[] = [];
 
     if (request.preActionScreenshot) {
       userParts.push({ type: 'image', image: request.preActionScreenshot });
@@ -259,116 +427,7 @@ export class AIAgent {
 
     userParts.push({ type: 'text', text: textPrompt });
 
-    const promptBuildMs = roundDuration(performance.now() - promptBuildStartedAt);
-
-    // Input visibility: one INFO summary line + one DEBUG detail blob per plan call.
-    Logger.i(this._summarizePlannerRequest(request));
-    Logger.d(this._detailPlannerRequest(request, textPrompt));
-
-    const maxAttempts = MAX_LLM_ATTEMPTS;
-    let lastError: unknown;
-    let parsedResponse: PlannerResponse | undefined;
-    let llmMs = 0;
-    let parseMs = 0;
-    let lastLLMCall: LLMCallTrace | undefined;
-
-    const plannerResolved = this._resolveFeatureConfig(FEATURE_PLANNER);
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const llmPhase = startTracePhase(
-        request.traceStep,
-        'planning.llm',
-        `provider=${plannerResolved.provider} model=${plannerResolved.modelName} attempt=${attempt}/${maxAttempts}`,
-      );
-      const llmStartedAt = performance.now();
-
-      let rawOutput: unknown;
-      let rawText: string;
-      try {
-        const llmResult = await this._callLLM(systemPrompt, userParts, FEATURE_PLANNER);
-        rawOutput = llmResult.output;
-        rawText = llmResult.text;
-        lastLLMCall = llmResult.llmCall;
-      } catch (error) {
-        finishTracePhase(
-          llmPhase,
-          'failure',
-          error instanceof Error ? error.message : String(error),
-        );
-        if (FatalProviderError.isInstance(error)) {
-          throw error;
-        }
-        lastError = error;
-        if (attempt < maxAttempts) {
-          Logger.w(
-            `Planner attempt ${attempt}/${maxAttempts} failed (llm), retrying: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          continue;
-        }
-        throw error;
-      }
-
-      llmMs = roundDuration(performance.now() - llmStartedAt);
-      finishTracePhase(
-        llmPhase,
-        'success',
-        describeLLMTrace({ promptBuildMs, llmMs }),
-      );
-
-      const parsePhase = startTracePhase(
-        request.traceStep,
-        'planning.parse',
-        `attempt=${attempt}/${maxAttempts}`,
-      );
-      const parseStartedAt = performance.now();
-      try {
-        parsedResponse = this._parsePlannerResponse(rawOutput, rawText);
-        parseMs = roundDuration(performance.now() - parseStartedAt);
-        finishTracePhase(parsePhase, 'success');
-        break;
-      } catch (error) {
-        finishTracePhase(
-          parsePhase,
-          'failure',
-          error instanceof Error ? error.message : String(error),
-        );
-        lastError = error;
-        if (attempt < maxAttempts) {
-          Logger.w(
-            `Planner attempt ${attempt}/${maxAttempts} failed (parse), retrying: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (!parsedResponse) {
-      throw lastError ?? new Error('Planner failed after all retry attempts');
-    }
-
-    if (request.traceStep !== undefined) {
-      Logger.i(formatPlannerReasoning({
-        step: request.traceStep,
-        thought: parsedResponse.thought,
-        action: parsedResponse.act,
-        reason: parsedResponse.reason,
-      }));
-    }
-
-    return {
-      ...parsedResponse,
-      trace: {
-        totalMs: promptBuildMs + llmMs + parseMs,
-        promptBuildMs,
-        llmMs,
-        parseMs,
-      },
-      ...(lastLLMCall ? { llmCall: lastLLMCall } : {}),
-    };
+    return { userParts, textPrompt };
   }
 
   /**
@@ -385,12 +444,53 @@ export class AIAgent {
       }));
     }
 
-    const phaseName = request.tracePhase ?? 'action.ground';
     const promptBuildStartedAt = performance.now();
     const promptKey = this._getPromptKeyForFeature(request.feature);
     const systemPrompt = this._loadPrompt(promptKey);
+    const { userParts, text } = this._buildGrounderPrompt(request);
+    const promptBuildMs = roundDuration(performance.now() - promptBuildStartedAt);
 
-    const userParts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string }> = [];
+    // Input visibility: one INFO summary line + one DEBUG detail blob per grounder call.
+    Logger.i(this._summarizeGrounderRequest(request));
+    Logger.d(this._detailGrounderRequest(request, text));
+
+    const timings: LLMCallTimings = { llmMs: 0, parseMs: 0 };
+
+    const { response: parsed, llmCall: lastLLMCall } = await this._retryLLMAttempts(
+      { name: 'Grounder', suffix: ` for feature=${request.feature}` },
+      'Grounder failed after all retry attempts',
+      (attempt, maxAttempts) =>
+        this._runGrounderAttempt(
+          request,
+          systemPrompt,
+          userParts,
+          attempt,
+          maxAttempts,
+          promptBuildMs,
+          timings,
+        ),
+    );
+
+    this._logGrounderResult(request, parsed);
+
+    return {
+      ...parsed,
+      trace: {
+        totalMs: promptBuildMs + timings.llmMs + timings.parseMs,
+        promptBuildMs,
+        llmMs: timings.llmMs,
+        parseMs: timings.parseMs,
+      },
+      ...(lastLLMCall ? { llmCall: lastLLMCall } : {}),
+    };
+  }
+
+  /** Assemble the grounder user-message parts and text prompt. */
+  private _buildGrounderPrompt(request: GrounderRequest): {
+    userParts: UserPart[];
+    text: string;
+  } {
+    const userParts: UserPart[] = [];
 
     if (request.screenshot) {
       userParts.push({ type: 'image', image: request.screenshot });
@@ -413,123 +513,85 @@ export class AIAgent {
 
     userParts.push({ type: 'text', text });
 
-    const promptBuildMs = roundDuration(performance.now() - promptBuildStartedAt);
+    return { userParts, text };
+  }
 
-    // Input visibility: one INFO summary line + one DEBUG detail blob per grounder call.
-    Logger.i(this._summarizeGrounderRequest(request));
-    Logger.d(this._detailGrounderRequest(request, text));
+  /** Run one grounder LLM call + parse inside its single trace phase. */
+  private async _runGrounderAttempt(
+    request: GrounderRequest,
+    systemPrompt: string,
+    userParts: UserPart[],
+    attempt: number,
+    maxAttempts: number,
+    promptBuildMs: number,
+    timings: LLMCallTimings,
+  ): Promise<LLMAttemptOutcome<{ response: GrounderResponse; llmCall?: LLMCallTrace }>> {
+    const phase = startTracePhase(
+      request.traceStep,
+      request.tracePhase ?? 'action.ground',
+      `feature=${request.feature} attempt=${attempt}/${maxAttempts}`,
+    );
+    const llmStartedAt = performance.now();
 
-    const maxAttempts = MAX_LLM_ATTEMPTS;
-    let lastError: unknown;
-    let parsed: GrounderResponse | undefined;
-    let llmMs = 0;
-    let parseMs = 0;
-    let lastLLMCall: LLMCallTrace | undefined;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const phase = startTracePhase(
-        request.traceStep,
-        phaseName,
-        `feature=${request.feature} attempt=${attempt}/${maxAttempts}`,
+    let llmResult: { output: unknown; text: string; llmCall?: LLMCallTrace };
+    try {
+      llmResult = await this._callLLM(systemPrompt, userParts, request.feature);
+    } catch (error) {
+      finishTracePhase(
+        phase,
+        'failure',
+        error instanceof Error ? error.message : String(error),
       );
-      const llmStartedAt = performance.now();
-
-      let rawOutput: unknown;
-      let rawText: string;
-      try {
-        const llmResult = await this._callLLM(
-          systemPrompt,
-          userParts,
-          request.feature,
-        );
-        rawOutput = llmResult.output;
-        rawText = llmResult.text;
-        lastLLMCall = llmResult.llmCall;
-      } catch (error) {
-        finishTracePhase(
-          phase,
-          'failure',
-          error instanceof Error ? error.message : String(error),
-        );
-        if (FatalProviderError.isInstance(error)) {
-          throw error;
-        }
-        lastError = error;
-        if (attempt < maxAttempts) {
-          Logger.w(
-            `Grounder attempt ${attempt}/${maxAttempts} failed (llm) for feature=${request.feature}, retrying: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          continue;
-        }
+      if (FatalProviderError.isInstance(error)) {
         throw error;
       }
-
-      llmMs = roundDuration(performance.now() - llmStartedAt);
-      const parseStartedAt = performance.now();
-
-      try {
-        parsed = this._parseGrounderResponse(rawOutput, rawText);
-        parseMs = roundDuration(performance.now() - parseStartedAt);
-        finishTracePhase(
-          phase,
-          'success',
-          describeLLMTrace({
-            promptBuildMs,
-            llmMs,
-            parseMs,
-            extraDetail: `feature=${request.feature}`,
-          }),
-        );
-        break;
-      } catch (error) {
-        finishTracePhase(
-          phase,
-          'failure',
-          error instanceof Error ? error.message : String(error),
-        );
-        lastError = error;
-        if (attempt < maxAttempts) {
-          Logger.w(
-            `Grounder attempt ${attempt}/${maxAttempts} failed (parse) for feature=${request.feature}, retrying: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          continue;
-        }
-        throw error;
-      }
+      return { kind: 'failed', stage: 'llm', error };
     }
 
-    if (!parsed) {
-      throw lastError ?? new Error('Grounder failed after all retry attempts');
+    timings.llmMs = roundDuration(performance.now() - llmStartedAt);
+    const parseStartedAt = performance.now();
+
+    try {
+      const response = this._parseGrounderResponse(llmResult.output, llmResult.text);
+      timings.parseMs = roundDuration(performance.now() - parseStartedAt);
+      finishTracePhase(
+        phase,
+        'success',
+        describeLLMTrace({
+          promptBuildMs,
+          llmMs: timings.llmMs,
+          parseMs: timings.parseMs,
+          extraDetail: `feature=${request.feature}`,
+        }),
+      );
+      return { kind: 'ok', value: { response, llmCall: llmResult.llmCall } };
+    } catch (error) {
+      finishTracePhase(
+        phase,
+        'failure',
+        error instanceof Error ? error.message : String(error),
+      );
+      return { kind: 'failed', stage: 'parse', error };
+    }
+  }
+
+  /** Log the grounder result with resolved element bounds when tracing a step. */
+  private _logGrounderResult(request: GrounderRequest, parsed: GrounderResponse): void {
+    if (request.traceStep === undefined) {
+      return;
     }
 
-    if (request.traceStep !== undefined) {
-      let bounds: [number, number, number, number] | null = null;
-      const idx = parsed.output['index'];
-      if (typeof idx === 'number' && request.hierarchy) {
-        const node = request.hierarchy.flattenedHierarchy[idx];
-        bounds = node?.bounds ?? null;
-      }
-      Logger.i(formatGrounderResult({
-        step: request.traceStep,
-        output: parsed.output,
-        bounds,
-      }));
+    let bounds: [number, number, number, number] | null = null;
+    const idx = parsed.output['index'];
+    if (typeof idx === 'number' && request.hierarchy) {
+      const node = request.hierarchy.flattenedHierarchy[idx];
+      bounds = node?.bounds ?? null;
     }
-
-    return {
-      ...parsed,
-      trace: {
-        totalMs: promptBuildMs + llmMs + parseMs,
-        promptBuildMs,
-        llmMs,
-        parseMs,
-      },
-      ...(lastLLMCall ? { llmCall: lastLLMCall } : {}),
-    };
+    Logger.i(formatGrounderResult({
+      step: request.traceStep,
+      output: parsed.output,
+      bounds,
+    }));
   }
 
   // ---------- private ----------
@@ -541,7 +603,7 @@ export class AIAgent {
    */
   private async _callLLM(
     systemPrompt: string,
-    userParts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string }>,
+    userParts: UserPart[],
     feature: FeatureName,
   ): Promise<{ output: unknown; text: string; llmCall: LLMCallTrace }> {
     const resolved = this._resolveFeatureConfig(feature);
@@ -549,20 +611,9 @@ export class AIAgent {
     const providerOptions = this._getProviderOptions(resolved, feature);
     const phase = phaseForFeature(feature);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userContent: any[] = userParts.map((part) => {
-      if (part.type === 'image') {
-        return { type: 'image' as const, image: part.image };
-      }
-      return { type: 'text' as const, text: part.text };
-    });
-
     // Persist the exact messages we send so we can forward them verbatim to
     // observability backends (Langfuse stores these for debugging).
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'user' as const, content: userContent },
-    ];
+    const messages = this._buildLLMMessages(systemPrompt, userParts);
 
     const startedAt = new Date().toISOString();
     const startPerfMs = performance.now();
@@ -576,10 +627,7 @@ export class AIAgent {
     try {
       const result = await generateText({
         model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
+        messages,
         // Anthropic has no schema-less JSON mode — the @ai-sdk/anthropic
         // adapter drops responseFormat silently without a schema, letting
         // Claude free-write multiple candidate JSONs. Passing a schema routes
@@ -608,20 +656,18 @@ export class AIAgent {
     const completedAt = new Date().toISOString();
     const durationMs = roundDuration(performance.now() - startPerfMs);
 
-    const llmCall: LLMCallTrace = {
-      provider: resolved.provider,
-      model: resolved.modelName,
-      feature: feature ?? phase,
+    const llmCall = this._buildLLMCallTrace({
+      resolved,
+      feature,
+      phase,
       prompt: messages,
       completion: text,
-      usage: normalizeUsage(usage),
+      usage,
       startedAt,
       completedAt,
       durationMs,
-      ...(thrownError
-        ? { statusMessage: thrownError instanceof Error ? thrownError.message : String(thrownError) }
-        : {}),
-    };
+      thrownError,
+    });
 
     if (thrownError) {
       throw (
@@ -632,6 +678,63 @@ export class AIAgent {
       );
     }
 
+    this._logLLMResponse(feature, resolved, text, reasoningText);
+    return { output, text, llmCall };
+  }
+
+  /** Map user parts to SDK message content and pair them with the system prompt. */
+  private _buildLLMMessages(systemPrompt: string, userParts: UserPart[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const userContent: any[] = userParts.map((part) => {
+      if (part.type === 'image') {
+        return { type: 'image' as const, image: part.image };
+      }
+      return { type: 'text' as const, text: part.text };
+    });
+
+    return [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'user' as const, content: userContent },
+    ];
+  }
+
+  /** Assemble the observability record for one LLM call. */
+  private _buildLLMCallTrace(params: {
+    resolved: ResolvedFeatureConfig;
+    feature: FeatureName;
+    phase: LLMPhase;
+    prompt: unknown;
+    completion: string;
+    usage: unknown;
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+    thrownError: unknown;
+  }): LLMCallTrace {
+    const { thrownError } = params;
+    return {
+      provider: params.resolved.provider,
+      model: params.resolved.modelName,
+      feature: params.feature ?? params.phase,
+      prompt: params.prompt,
+      completion: params.completion,
+      usage: normalizeUsage(params.usage),
+      startedAt: params.startedAt,
+      completedAt: params.completedAt,
+      durationMs: params.durationMs,
+      ...(thrownError
+        ? { statusMessage: thrownError instanceof Error ? thrownError.message : String(thrownError) }
+        : {}),
+    };
+  }
+
+  /** Debug-log the model's reasoning (when present) and raw response text. */
+  private _logLLMResponse(
+    feature: FeatureName,
+    resolved: ResolvedFeatureConfig,
+    text: string,
+    reasoningText: string | undefined,
+  ): void {
     if (reasoningText) {
       Logger.d(
         `LLM reasoning [${feature}] (${resolved.provider}/${resolved.modelName}):\n${reasoningText}`,
@@ -641,7 +744,6 @@ export class AIAgent {
     Logger.d(
       `LLM response [${feature}] (${resolved.provider}/${resolved.modelName}):\n${text || '<empty response>'}`,
     );
-    return { output, text, llmCall };
   }
 
 
@@ -961,29 +1063,43 @@ export class AIAgent {
   }
 }
 
-function normalizePlannerResponse(json: JsonRecord): PlannerResponse {
-  const output = asRecord(json['output']) ?? json;
-  const thought = asRecord(output['thought']);
-  const action =
+/**
+ * Locate the record carrying the planner action, checking the wrapped and
+ * unwrapped shapes the models actually emit.
+ */
+function resolvePlannerAction(json: JsonRecord, output: JsonRecord): JsonRecord | undefined {
+  return (
     asRecord(output['action']) ??
     asRecord(json['action']) ??
     (normalizeString(output['action_type']) ? output : undefined) ??
-    (normalizeString(json['action_type']) ? json : undefined);
+    (normalizeString(json['action_type']) ? json : undefined)
+  );
+}
+
+/** Fallback response for planner output that carries no action record. */
+function plannerResponseWithoutAction(json: JsonRecord, output: JsonRecord): PlannerResponse {
+  if (typeof json['act'] === 'string') {
+    return {
+      act: json['act'],
+      reason: normalizeString(json['reason']) ?? '',
+      remember: normalizeRemember(json['remember']),
+    };
+  }
+
+  return {
+    act: '',
+    reason: '',
+    remember: normalizeRemember(output['remember']),
+  };
+}
+
+function normalizePlannerResponse(json: JsonRecord): PlannerResponse {
+  const output = asRecord(json['output']) ?? json;
+  const thought = asRecord(output['thought']);
+  const action = resolvePlannerAction(json, output);
 
   if (!action) {
-    if (typeof json['act'] === 'string') {
-      return {
-        act: json['act'],
-        reason: normalizeString(json['reason']) ?? '',
-        remember: normalizeRemember(json['remember']),
-      };
-    }
-
-    return {
-      act: '',
-      reason: '',
-      remember: normalizeRemember(output['remember']),
-    };
+    return plannerResponseWithoutAction(json, output);
   }
 
   const normalizedAction = normalizePromptAction(
@@ -1023,61 +1139,72 @@ function normalizePlannerResponse(json: JsonRecord): PlannerResponse {
   };
 }
 
+/**
+ * Prompt action_types that normalize to a fixed act/reason pair. A Map (not a
+ * plain object) so LLM-controlled strings like "toString" cannot resolve to
+ * inherited prototype members — they fall through to the unsupported default.
+ */
+const FIXED_PROMPT_ACTIONS: ReadonlyMap<string, { act: string; reason: string }> = new Map([
+  ['tap', { act: PLANNER_ACTION_TAP, reason: 'Tap the target element.' }],
+  ['long_press', { act: PLANNER_ACTION_LONG_PRESS, reason: 'Long press the target element.' }],
+  ['input_text', { act: PLANNER_ACTION_TYPE, reason: 'Type text into the target input field.' }],
+  ['navigate_home', { act: PLANNER_ACTION_HOME, reason: 'Navigate to the device home screen.' }],
+  ['rotate', { act: PLANNER_ACTION_ROTATE, reason: 'Rotate the device orientation.' }],
+  ['navigate_back', { act: PLANNER_ACTION_BACK, reason: 'Navigate back one screen.' }],
+  ['hide_keyboard', { act: PLANNER_ACTION_HIDE_KEYBOARD, reason: 'Hide the software keyboard.' }],
+  ['keyboard_enter', { act: PLANNER_ACTION_PRESS_ENTER, reason: 'Press the enter key.' }],
+  ['wait', { act: PLANNER_ACTION_WAIT, reason: 'Wait for the UI to stabilize.' }],
+  ['deep_link', { act: PLANNER_ACTION_DEEPLINK, reason: 'Open the deeplink URL.' }],
+  ['set_location', { act: PLANNER_ACTION_SET_LOCATION, reason: 'Set the device location.' }],
+  ['launch_app', { act: PLANNER_ACTION_LAUNCH_APP, reason: 'Launch the target app.' }],
+]);
+
+/** Normalize a `swipe` prompt action, deriving the reason from act/direction. */
+function normalizeSwipeAction(action: JsonRecord): { act: string; reason: string } {
+  return {
+    act: PLANNER_ACTION_SCROLL,
+    reason: firstNonEmpty(
+      normalizeString(action['act']),
+      normalizeString(action['direction']) ? `Swipe ${normalizeString(action['direction'])}` : undefined,
+      'Scroll the current view.',
+    ) ?? 'Scroll the current view.',
+  };
+}
+
+/** Normalize a terminal `status` prompt action to completed/failed. */
+function normalizeStatusAction(action: JsonRecord): { act: string; reason: string } {
+  const result = normalizeString(action['result'])?.toLowerCase();
+  return {
+    act: result === 'success' ? PLANNER_ACTION_COMPLETED : PLANNER_ACTION_FAILED,
+    reason: firstNonEmpty(
+      normalizeString(action['analysis']),
+      normalizeString(action['result']),
+      'Planner returned final status.',
+    ) ?? 'Planner returned final status.',
+  };
+}
+
 function normalizePromptAction(
   actionType: string,
   action: JsonRecord,
 ): { act: string; reason: string } {
-  switch (actionType) {
-    case 'tap':
-      return { act: PLANNER_ACTION_TAP, reason: 'Tap the target element.' };
-    case 'long_press':
-      return { act: PLANNER_ACTION_LONG_PRESS, reason: 'Long press the target element.' };
-    case 'input_text':
-      return { act: PLANNER_ACTION_TYPE, reason: 'Type text into the target input field.' };
-    case 'swipe':
-      return {
-        act: PLANNER_ACTION_SCROLL,
-        reason: firstNonEmpty(
-          normalizeString(action['act']),
-          normalizeString(action['direction']) ? `Swipe ${normalizeString(action['direction'])}` : undefined,
-          'Scroll the current view.',
-        ) ?? 'Scroll the current view.',
-      };
-    case 'navigate_home':
-      return { act: PLANNER_ACTION_HOME, reason: 'Navigate to the device home screen.' };
-    case 'rotate':
-      return { act: PLANNER_ACTION_ROTATE, reason: 'Rotate the device orientation.' };
-    case 'navigate_back':
-      return { act: PLANNER_ACTION_BACK, reason: 'Navigate back one screen.' };
-    case 'hide_keyboard':
-      return { act: PLANNER_ACTION_HIDE_KEYBOARD, reason: 'Hide the software keyboard.' };
-    case 'keyboard_enter':
-      return { act: PLANNER_ACTION_PRESS_ENTER, reason: 'Press the enter key.' };
-    case 'wait':
-      return { act: PLANNER_ACTION_WAIT, reason: 'Wait for the UI to stabilize.' };
-    case 'deep_link':
-      return { act: PLANNER_ACTION_DEEPLINK, reason: 'Open the deeplink URL.' };
-    case 'set_location':
-      return { act: PLANNER_ACTION_SET_LOCATION, reason: 'Set the device location.' };
-    case 'launch_app':
-      return { act: PLANNER_ACTION_LAUNCH_APP, reason: 'Launch the target app.' };
-    case 'status': {
-      const result = normalizeString(action['result'])?.toLowerCase();
-      return {
-        act: result === 'success' ? PLANNER_ACTION_COMPLETED : PLANNER_ACTION_FAILED,
-        reason: firstNonEmpty(
-          normalizeString(action['analysis']),
-          normalizeString(action['result']),
-          'Planner returned final status.',
-        ) ?? 'Planner returned final status.',
-      };
-    }
-    default:
-      return {
-        act: actionType,
-        reason: `Planner returned unsupported action_type: ${actionType}`,
-      };
+  const fixed = FIXED_PROMPT_ACTIONS.get(actionType);
+  if (fixed) {
+    return { ...fixed };
   }
+
+  if (actionType === 'swipe') {
+    return normalizeSwipeAction(action);
+  }
+
+  if (actionType === 'status') {
+    return normalizeStatusAction(action);
+  }
+
+  return {
+    act: actionType,
+    reason: `Planner returned unsupported action_type: ${actionType}`,
+  };
 }
 
 function asRecord(value: unknown): JsonRecord | undefined {
@@ -1139,20 +1266,19 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
  * (input/output/total, optional input_cached_tokens only if > 0).
  * Fields default to 0 when the provider omits them.
  */
+/** Read a token count from the SDK usage object, trying the legacy field name second. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function usageTokenCount(usage: any, field: string, legacyField: string): number {
+  if (typeof usage?.[field] === 'number') {
+    return usage[field];
+  }
+  return typeof usage?.[legacyField] === 'number' ? usage[legacyField] : 0;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeUsage(usage: any): { input: number; output: number; total: number; input_cached_tokens?: number } {
-  const input =
-    typeof usage?.inputTokens === 'number'
-      ? usage.inputTokens
-      : typeof usage?.promptTokens === 'number'
-        ? usage.promptTokens
-        : 0;
-  const output =
-    typeof usage?.outputTokens === 'number'
-      ? usage.outputTokens
-      : typeof usage?.completionTokens === 'number'
-        ? usage.completionTokens
-        : 0;
+  const input = usageTokenCount(usage, 'inputTokens', 'promptTokens');
+  const output = usageTokenCount(usage, 'outputTokens', 'completionTokens');
   const total =
     typeof usage?.totalTokens === 'number'
       ? usage.totalTokens
