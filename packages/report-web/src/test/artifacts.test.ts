@@ -10,8 +10,8 @@ import test from 'node:test';
 import * as artifacts from '../artifacts';
 
 test('artifacts.ts stays a type-only barrel with zero runtime exports', () => {
-  const runtimeKeys = Object.keys(artifacts).filter(
-    (key) => key !== 'default' && key !== '__esModule',
-  );
-  assert.deepEqual(runtimeKeys, []);
+  // Compared directly, with no allow-list: filtering out `default`/`__esModule`
+  // would let an added default export slip through, and neither key is present
+  // under the tsx loader anyway (verified — the namespace is genuinely empty).
+  assert.deepEqual(Object.keys(artifacts), []);
 });

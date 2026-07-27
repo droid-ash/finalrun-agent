@@ -244,6 +244,25 @@ type-only barrel. `fab memory-index` MUST be run afterwards and `--check` MUST e
 
 ## Notes
 
+### Skipped: rewriting archived fab bookkeeping (CodeRabbit, PR #162)
+
+CodeRabbit asked that the archived `260727-18tg` change's `.history.jsonl` and `.status.yaml` be made
+to "describe one consistent stage timeline" — moving the review-passed event before the hydrate
+entry, or preserving first-attempt start times separately from re-entry timestamps.
+
+**Skipped, deliberately.** Both files are **tool-generated**: `.history.jsonl` is an append-only
+event log written by `fab status`, and `stage_metrics` is computed by fab's Go status layer. The
+apparent inconsistency is not an error — it is a faithful record of a **rework cycle**. That change
+failed review on a real regression, apply re-ran, and review re-ran and passed; `iterations: 2`
+records exactly that. Events appear in the order they occurred, which is what an append-only audit
+log is for.
+
+Hand-editing either file would falsify an audit trail of a merged change and put the artifact out of
+sync with the tool that owns its format — and any future `fab status refresh` could overwrite the
+edit anyway. If the rendering of a reworked stage's timeline is genuinely confusing, the fix belongs
+in fab's status layer, not in a retro-edit of one change's records.
+
+
 ### Recorded from CodeRabbit/review of PR — not addressed here
 
 **1. Nothing typechecks these test files.** Review injected a pure excess-property type error into a
