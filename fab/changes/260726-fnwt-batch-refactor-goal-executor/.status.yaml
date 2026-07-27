@@ -10,12 +10,12 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 17
-    acceptance_count: 16
-    acceptance_completed: 16
+    acceptance_count: 17
+    acceptance_completed: 17
 confidence:
     certain: 9
     confident: 1
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-27T01:36:43Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T01:57:20Z"}
     hydrate: {started_at: "2026-07-27T01:57:20Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T02:04:29Z"}
     ship: {started_at: "2026-07-27T02:04:29Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-27T02:07:45Z"}
-    review-pr: {started_at: "2026-07-27T02:07:45Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-27T02:07:45Z", driver: git-pr, iterations: 1, completed_at: "2026-07-27T02:21:43Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/159
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: Recorded the batched-refactor scoping rule and the differential-harness equivalence proof, and sharpened the phase-outcome DD with the nullable-failure form
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-27T02:07:45Z
+last_updated: 2026-07-27T02:21:43Z
