@@ -10,12 +10,12 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 4
-    acceptance_count: 10
-    acceptance_completed: 10
+    acceptance_count: 11
+    acceptance_completed: 11
 confidence:
     certain: 4
     confident: 4
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-28T10:13:06Z", driver: fab-fff, iterations: 3, completed_at: "2026-07-28T10:27:29Z"}
     hydrate: {started_at: "2026-07-28T10:27:29Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T10:35:47Z"}
     ship: {started_at: "2026-07-28T10:35:47Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T10:38:51Z"}
-    review-pr: {started_at: "2026-07-28T10:38:51Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-28T10:38:51Z", driver: git-pr, iterations: 1, completed_at: "2026-07-28T10:57:23Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/165
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: removes ci.yml's concurrency block so every push to an open PR keeps its own completed test run, and records the enforcement half — the test check required on main via ruleset 14531661, pinned to the GitHub Actions app, non-strict
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-28T10:38:51Z
+last_updated: 2026-07-28T10:57:23Z
