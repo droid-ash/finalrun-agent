@@ -6,6 +6,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import type { DeviceInventoryEntry } from '@finalrun/common';
+import { MAX_DIAGNOSTIC_OUTPUT_CHUNKS } from '../../diagnosticBuffer.js';
 import { DeviceDiscoveryService } from '../DeviceDiscoveryService.js';
 
 class FakeChildProcess extends EventEmitter {
@@ -314,6 +315,156 @@ test('DeviceDiscoveryService startTarget boots a shutdown iOS simulator and wait
 
   assert.equal(diagnostic, null);
   assert.equal(listCalls >= 2, true);
+});
+
+test('DeviceDiscoveryService bounds the emulator output capture to the most recent chunks', async () => {
+  // Regression test for the unbounded per-call capture buffers: the emulator
+  // child is spawned detached and long-lived, and its chunks are consumed
+  // only by _emulatorTranscript for a startup diagnostic. The buffers are now
+  // a bounded ring (retain the most recent 20, drop the oldest), observed
+  // here through the transcript on the startup-failure diagnostic.
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'finalrun-android-bound-'));
+  const sdkDir = path.join(tempDir, 'sdk');
+  const emulatorBinary = path.join(sdkDir, 'emulator', 'emulator');
+  await mkdir(path.dirname(emulatorBinary), { recursive: true });
+  await writeFile(emulatorBinary, '', 'utf-8');
+
+  const startableEntry: DeviceInventoryEntry = {
+    selectionId: 'android-avd:Pixel_8_API_34',
+    platform: 'android',
+    targetKind: 'android-emulator',
+    state: 'shutdown',
+    runnable: false,
+    startable: true,
+    displayName: 'Pixel 8 - Android API 34 - Pixel_8_API_34',
+    rawId: 'Pixel_8_API_34',
+    modelName: 'Pixel 8',
+    osVersionLabel: 'Android API 34',
+    deviceInfo: null,
+    transcripts: [],
+  };
+
+  const child = new FakeChildProcess();
+  const discoveryService = new DeviceDiscoveryService({
+    env: {
+      NODE_ENV: 'test',
+      ANDROID_HOME: sdkDir,
+    },
+    delayFn: async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+    spawnFn: ((() => {
+      queueMicrotask(() => {
+        for (let i = 1; i <= 25; i += 1) {
+          child.stdout.write(`out${String(i).padStart(2, '0')};`);
+          child.stderr.write(`err${String(i).padStart(2, '0')};`);
+        }
+        // Immediate death: the settle check sees a non-null exit code and
+        // returns the startup-failure diagnostic carrying the transcript.
+        child.exitCode = 1;
+      });
+      return child as unknown as ReturnType<typeof import('child_process').spawn>;
+    }) as unknown) as typeof import('child_process').spawn,
+    execFileFn: async (file, args) => {
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`);
+    },
+  });
+
+  try {
+    const diagnostic = await discoveryService.startTarget(startableEntry, '/platform-tools/adb');
+
+    assert.notEqual(diagnostic, null);
+    const transcript = diagnostic?.transcripts[0];
+    assert.ok(transcript, 'the startup failure must carry the emulator transcript');
+    // The tail survives...
+    assert.match(transcript.stdout, /out06;/);
+    assert.match(transcript.stdout, /out25;/);
+    assert.match(transcript.stderr, /err06;/);
+    assert.match(transcript.stderr, /err25;/);
+    // ...and the oldest chunks beyond the bound are dropped.
+    assert.doesNotMatch(transcript.stdout, /out01;/);
+    assert.doesNotMatch(transcript.stdout, /out05;/);
+    assert.doesNotMatch(transcript.stderr, /err01;/);
+    assert.doesNotMatch(transcript.stderr, /err05;/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('DeviceDiscoveryService bounds the emulator capture on the spawn-error path too', async () => {
+  // The capture buffer has THREE writers: the two stream handlers and the
+  // once('error') handler, which pushes the spawn error's message. That third
+  // site is the one a reader is most likely to miss, and a ring one writer
+  // ignores is not a ring. Overflow there was bounded at a single entry (the
+  // listener is `once`), so this pins consistency rather than a leak.
+  //
+  // Exactly MAX chunks are driven first, so the buffer sits at the cap with
+  // nothing yet dropped; the error push is then the one that must evict.
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'finalrun-android-errbound-'));
+  const sdkDir = path.join(tempDir, 'sdk');
+  const emulatorBinary = path.join(sdkDir, 'emulator', 'emulator');
+  await mkdir(path.dirname(emulatorBinary), { recursive: true });
+  await writeFile(emulatorBinary, '', 'utf-8');
+
+  const startableEntry: DeviceInventoryEntry = {
+    selectionId: 'android-avd:Pixel_8_API_34',
+    platform: 'android',
+    targetKind: 'android-emulator',
+    state: 'shutdown',
+    runnable: false,
+    startable: true,
+    displayName: 'Pixel 8 - Android API 34 - Pixel_8_API_34',
+    rawId: 'Pixel_8_API_34',
+    modelName: 'Pixel 8',
+    osVersionLabel: 'Android API 34',
+    deviceInfo: null,
+    transcripts: [],
+  };
+
+  const child = new FakeChildProcess();
+  const discoveryService = new DeviceDiscoveryService({
+    env: {
+      NODE_ENV: 'test',
+      ANDROID_HOME: sdkDir,
+    },
+    delayFn: async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+    spawnFn: ((() => {
+      queueMicrotask(() => {
+        for (let i = 1; i <= MAX_DIAGNOSTIC_OUTPUT_CHUNKS; i += 1) {
+          child.stderr.write(`err${String(i).padStart(2, '0')};`);
+        }
+        // Registered via once('error'), so this lands on the same buffer and
+        // takes it one past the cap.
+        child.emit('error', new Error('spawn ENOENT emulator'));
+      });
+      return child as unknown as ReturnType<typeof import('child_process').spawn>;
+    }) as unknown) as typeof import('child_process').spawn,
+    execFileFn: async (file, args) => {
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`);
+    },
+  });
+
+  try {
+    const diagnostic = await discoveryService.startTarget(startableEntry, '/platform-tools/adb');
+
+    assert.notEqual(diagnostic, null);
+    const transcript = diagnostic?.transcripts[0];
+    assert.ok(transcript, 'the spawn failure must carry the emulator transcript');
+    // The error message is retained — evicting it instead would defeat the
+    // buffer's only purpose on this path.
+    assert.match(transcript.stderr, /spawn ENOENT emulator/);
+    // ...and its push evicted the oldest chunk rather than exceeding the cap.
+    assert.doesNotMatch(transcript.stderr, /err01;/);
+    assert.match(transcript.stderr, /err02;/);
+    assert.match(
+      transcript.stderr,
+      new RegExp(`err${String(MAX_DIAGNOSTIC_OUTPUT_CHUNKS).padStart(2, '0')};`),
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('DeviceDiscoveryService startTarget launches an Android emulator and waits for boot completion', async () => {

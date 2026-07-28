@@ -9,6 +9,7 @@ import {
   type RecordingRequest,
 } from '@finalrun/common';
 import type { RecordingProvider, RecordingProviderResult } from './RecordingProvider.js';
+import { MAX_DIAGNOSTIC_OUTPUT_CHUNKS } from '../diagnosticBuffer.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -223,7 +224,13 @@ export class AndroidRecordingProvider implements RecordingProvider {
     ];
   }
 
-  /** Spawn scrcpy, mirroring its output into the logger and per-call chunk buffers. */
+  /**
+   * Spawn scrcpy, mirroring its output into the logger and per-call chunk
+   * buffers. The buffers are a bounded ring (most recent chunks kept, oldest
+   * dropped): their only consumer is `_formatStartupExit` during the startup
+   * window, but the listeners live for the whole recording, so unbounded
+   * pushes would grow for the session's lifetime with nothing reading them.
+   */
   private _spawnScrcpy(args: string[]): {
     process: ChildProcess;
     stdoutChunks: string[];
@@ -238,11 +245,17 @@ export class AndroidRecordingProvider implements RecordingProvider {
     process.stdout?.on('data', (data: Buffer | string) => {
       const message = String(data);
       stdoutChunks.push(message);
+      if (stdoutChunks.length > MAX_DIAGNOSTIC_OUTPUT_CHUNKS) {
+        stdoutChunks.shift();
+      }
       Logger.i(`scrcpy stdout: ${message}`);
     });
     process.stderr?.on('data', (data: Buffer | string) => {
       const message = String(data);
       stderrChunks.push(message);
+      if (stderrChunks.length > MAX_DIAGNOSTIC_OUTPUT_CHUNKS) {
+        stderrChunks.shift();
+      }
       Logger.w(`scrcpy stderr: ${message}`);
     });
 
