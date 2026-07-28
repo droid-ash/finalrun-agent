@@ -44,12 +44,14 @@ jobs:
         run: npm run build --workspaces
 
       # Typecheck every workspace explicitly (tsc --noEmit -p tsconfig.json
-      # per package, fanned out WITHOUT --if-present). This is the one stage
-      # that typechecks report-web at all (its tsup/vite build never runs
-      # tsc); for the five tsc-building packages it is redundant with their
-      # build, deliberately — so a future build-tool switch cannot silently
-      # drop the check. It runs after build because dependent
-      # packages resolve @finalrun/* types from built dist/ declarations.
+      # per TypeScript package, fanned out WITHOUT --if-present;
+      # local-runtime's typecheck script is an explicit no-op — it has no
+      # TypeScript to check). This is the one stage that typechecks
+      # report-web at all (its tsup/vite build never runs tsc); for the five
+      # tsc-building packages it is redundant with their build, deliberately
+      # — so a future build-tool switch cannot silently drop the check. It
+      # runs after build because dependent packages resolve @finalrun/*
+      # types from built dist/ declarations.
       - name: Typecheck all workspaces
         run: npm run typecheck
 

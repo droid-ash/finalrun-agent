@@ -704,3 +704,54 @@ test('ActionExecutor surfaces terminal provider failures from visual grounding f
   assertTraceNames(result.trace, ['action.ground', 'action.visual_fallback']);
   assert.equal(result.trace?.spans[1]?.status, 'failure');
 });
+
+test('ActionExecutor substitutes the fallback error for blank driver failure messages', async () => {
+  // Callers throw result.error directly (see _runSingleDeviceAction), so an
+  // empty or whitespace-only driver message must be normalized to the
+  // 'Action failed' fallback instead of surfacing as a blank error.
+  for (const message of ['', '   ']) {
+    const agent = createAgent([]);
+    agent.executeAction = async () => new DeviceNodeResponse({ success: false, message });
+
+    const executor = new ActionExecutor({
+      agent,
+      aiAgent: createAiAgent(async () => {
+        throw new Error('Grounder should not be called for rotate actions');
+      }),
+      platform: 'android',
+    });
+
+    const result = await executor.executeAction({
+      action: PLANNER_ACTION_ROTATE,
+      reason: 'Rotate the device.',
+      screenWidth: 1080,
+      screenHeight: 2400,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Action failed');
+  }
+
+  // A non-blank driver message is preserved verbatim.
+  const agent = createAgent([]);
+  agent.executeAction = async () =>
+    new DeviceNodeResponse({ success: false, message: 'Rotation is not supported.' });
+
+  const executor = new ActionExecutor({
+    agent,
+    aiAgent: createAiAgent(async () => {
+      throw new Error('Grounder should not be called for rotate actions');
+    }),
+    platform: 'android',
+  });
+
+  const result = await executor.executeAction({
+    action: PLANNER_ACTION_ROTATE,
+    reason: 'Rotate the device.',
+    screenWidth: 1080,
+    screenHeight: 2400,
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error, 'Rotation is not supported.');
+});

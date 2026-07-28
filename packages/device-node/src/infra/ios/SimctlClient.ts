@@ -533,22 +533,18 @@ export class SimctlClient {
   /**
    * Replaces the eight inline `(value as string | undefined)?.trim()` casts.
    *
-   * Cast semantics are identical, but the *thrown message* is not: if a record
-   * carries a non-string, non-null value (a malformed `Info.plist` with, say,
-   * `CFBundleVersion: 17`), V8 builds the TypeError text from the source
-   * expression, so it now reads `value?.trim is not a function` where the
-   * inline form read `valueRecord.CFBundleVersion?.trim is not a function`.
-   * That string is caught by `_listInstalledAppMetadata` and propagated
-   * verbatim as `message` by `uninstallUserApps` and `isAppInstalled`, so it is
-   * user-reachable. The delta is accepted, not overlooked: the throw class,
-   * throw point, success/failure classification and returned data are all
-   * unchanged, and neither string is a designed diagnostic — both leak an
-   * internal expression name. Preserving the old text is impossible without
-   * re-inlining all eight call sites, which is what put the enclosing method
-   * over the complexity ceiling.
+   * The runtime check matches the declared `unknown` parameter: values come
+   * from `JSON.parse` of `simctl listapps` output, and a malformed
+   * `Info.plist` can carry a field as a number or nested object (say,
+   * `CFBundleVersion: 17`). A non-string, non-nullish value yields
+   * `undefined` — degrading that one field to its call site's existing
+   * fallback (`|| fallbackName`, `?? null`, the `com.apple.` prefix default)
+   * — instead of throwing a TypeError that aborted enumeration of the entire
+   * app list and surfaced verbatim through `uninstallUserApps` and
+   * `isAppInstalled`.
    */
   private _trimmed(value: unknown): string | undefined {
-    return (value as string | undefined)?.trim();
+    return typeof value === 'string' ? value.trim() : undefined;
   }
 
   private async _applySimctlPermissions(

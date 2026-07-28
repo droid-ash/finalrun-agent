@@ -38,6 +38,47 @@ test('SimctlClient.listInstalledApps parses app metadata from simctl listapps', 
   );
 });
 
+test('SimctlClient.listInstalledApps tolerates a non-string plist value without failing the listing', async () => {
+  // Regression test for the unsafe cast formerly inside _trimmed: a malformed
+  // Info.plist can carry CFBundleVersion as a number, which used to throw
+  // `TypeError: value?.trim is not a function` inside metadata parsing and
+  // abort enumeration of the ENTIRE app list. A non-string field must degrade
+  // only that field (version: null) and leave every other app enumerated.
+  const simctlClient = new SimctlClient({
+    execFileFn: async () => ({
+      stdout: JSON.stringify({
+        'org.wikipedia': {
+          CFBundleDisplayName: 'Wikipedia',
+          CFBundleVersion: 771,
+        },
+        'com.example.other': {
+          CFBundleDisplayName: 'Other',
+          CFBundleVersion: '1.0',
+        },
+      }),
+      stderr: '',
+    }),
+  });
+
+  const apps = await simctlClient.listInstalledApps('SIM-1');
+
+  assert.deepEqual(
+    apps.map((app) => app.toJson()),
+    [
+      new DeviceAppInfo({
+        packageName: 'com.example.other',
+        name: 'Other',
+        version: '1.0',
+      }).toJson(),
+      new DeviceAppInfo({
+        packageName: 'org.wikipedia',
+        name: 'Wikipedia',
+        version: null,
+      }).toJson(),
+    ],
+  );
+});
+
 test('SimctlClient.isAppInstalled returns success when bundle id is in listapps output', async () => {
   const simctlClient = new SimctlClient({
     execFileFn: async () => ({

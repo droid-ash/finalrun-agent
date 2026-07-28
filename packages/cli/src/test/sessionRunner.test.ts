@@ -562,6 +562,7 @@ function createPrepareDeps(params: {
   onStartTarget?: (
     entry: DeviceInventoryEntry,
   ) => DeviceInventoryDiagnostic | null | Promise<DeviceInventoryDiagnostic | null>;
+  adbPath?: string | null;
 }) {
   let cleanupCalls = 0;
   let inventoryCallCount = 0;
@@ -596,9 +597,7 @@ function createPrepareDeps(params: {
   const dependencies: TestSessionDeps = {
     createFilePathUtil: () =>
       ({
-        async getADBPath() {
-          return '/usr/bin/adb';
-        },
+        getADBPath: async () => (params.adbPath === undefined ? '/usr/bin/adb' : params.adbPath),
       }) as never,
     getDeviceNode: () => deviceNode as unknown as DeviceNode,
     createSelectionIO: () => ({
@@ -702,4 +701,64 @@ test('prepareTestSession reports the platform-scoped message when nothing is usa
     },
   );
   assert.equal(harness.getCleanupCalls(), 1);
+});
+
+test('prepareTestSession derives the session platform from the device on both branches', async () => {
+  // Characterization, not regression: pins the platform derivation for both
+  // the Android and iOS branches so that delegating it to
+  // DeviceInfo.getPlatform() is provably behaviour-preserving
+  // (PLATFORM_IOS === 'ios'). This test passed against the source BEFORE
+  // that edit and must keep passing unchanged after it.
+  const androidInfo = createAndroidDeviceInfo();
+  const androidHarness = createPrepareDeps({
+    inventoryReports: [{ entries: [createRunnableEntry(androidInfo)], diagnostics: [] }],
+  });
+  const androidSession = await prepareTestSession({}, androidHarness.dependencies);
+  assert.equal(androidSession.platform, 'android');
+
+  const iosInfo = new DeviceInfo({
+    id: 'SIM-UDID-1',
+    deviceUUID: 'SIM-UDID-1',
+    isAndroid: false,
+    sdkVersion: 17,
+    name: 'iPhone 15',
+  });
+  const iosEntry: DeviceInventoryEntry = {
+    selectionId: `ios-simulator:${iosInfo.id}`,
+    platform: 'ios',
+    targetKind: 'ios-simulator',
+    state: 'booted',
+    stateDetail: null,
+    runnable: true,
+    startable: false,
+    displayName: `${iosInfo.name} - ${iosInfo.id}`,
+    rawId: iosInfo.id ?? iosInfo.deviceUUID,
+    modelName: iosInfo.name,
+    osVersionLabel: 'iOS 17.5',
+    deviceInfo: iosInfo,
+    transcripts: [],
+  };
+  const iosHarness = createPrepareDeps({
+    inventoryReports: [{ entries: [iosEntry], diagnostics: [] }],
+  });
+  const iosSession = await prepareTestSession({}, iosHarness.dependencies);
+  assert.equal(iosSession.platform, 'ios');
+});
+
+test('prepareTestSession rejects an Android app override when adb is unavailable', async () => {
+  // Regression test for the former `params.adbPath!` assertion: a null adb
+  // path used to be silenced by the non-null assertion and passed straight
+  // into installAndroidApp. It must instead fail with a descriptive error,
+  // mirroring the adjacent device-serial guard.
+  const deviceInfo = createAndroidDeviceInfo();
+  const harness = createPrepareDeps({
+    inventoryReports: [{ entries: [createRunnableEntry(deviceInfo)], diagnostics: [] }],
+    adbPath: null,
+  });
+
+  await assert.rejects(
+    () => prepareTestSession({ appOverridePath: '/tmp/override.apk' }, harness.dependencies),
+    /adb path is required to install an Android app override/,
+  );
+  assert.equal(harness.getCleanupCalls(), 1, 'the failed install must release device resources');
 });

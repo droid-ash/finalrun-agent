@@ -13,6 +13,7 @@ import {
   type DeviceInventoryReport,
   type DeviceInventoryState,
 } from '@finalrun/common';
+import { MAX_DIAGNOSTIC_OUTPUT_CHUNKS } from '../diagnosticBuffer.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -593,7 +594,13 @@ export class DeviceDiscoveryService {
     ]);
   }
 
-  /** Spawn the emulator detached, accumulating output and any spawn error on a per-call capture context. */
+  /**
+   * Spawn the emulator detached, accumulating output and any spawn error on a
+   * per-call capture context. The chunk buffers are a bounded ring (most
+   * recent chunks kept, oldest dropped): the child is long-lived, and the
+   * chunks are consumed only by `_emulatorTranscript` for a startup
+   * diagnostic, so unbounded pushes would grow for the emulator's lifetime.
+   */
   private _spawnEmulatorWithCapture(
     emulatorPath: string,
     args: string[],
@@ -610,13 +617,26 @@ export class DeviceDiscoveryService {
 
     capture.child.stdout?.on('data', (chunk: Buffer | string) => {
       capture.stdoutChunks.push(String(chunk));
+      if (capture.stdoutChunks.length > MAX_DIAGNOSTIC_OUTPUT_CHUNKS) {
+        capture.stdoutChunks.shift();
+      }
     });
     capture.child.stderr?.on('data', (chunk: Buffer | string) => {
       capture.stderrChunks.push(String(chunk));
+      if (capture.stderrChunks.length > MAX_DIAGNOSTIC_OUTPUT_CHUNKS) {
+        capture.stderrChunks.shift();
+      }
     });
     capture.child.once('error', (error) => {
       capture.spawnError = error;
+      // Capped like the two stream handlers above: this is the buffer's third
+      // push site, and a ring that one writer ignores is not a ring. The
+      // listener is `once`, so the overflow was bounded at a single entry
+      // rather than unbounded — a consistency fix, not a leak fix.
       capture.stderrChunks.push(error.message);
+      if (capture.stderrChunks.length > MAX_DIAGNOSTIC_OUTPUT_CHUNKS) {
+        capture.stderrChunks.shift();
+      }
     });
 
     return capture;

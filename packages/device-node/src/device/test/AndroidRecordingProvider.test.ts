@@ -104,6 +104,54 @@ test('AndroidRecordingProvider fails startup if scrcpy exits during the readines
   );
 });
 
+test('AndroidRecordingProvider bounds its scrcpy output buffers to the most recent chunks', async () => {
+  // Regression test for the unbounded per-call chunk buffers: the listeners
+  // used to push for the entire recording lifetime with nothing ever reading
+  // the result after startup. The buffers are now a bounded ring (retain the
+  // most recent 20, drop the oldest), observed here through the startup
+  // failure detail that _formatStartupExit composes from the retained tail.
+  const process = new FakeChildProcess();
+  const provider = new AndroidRecordingProvider({
+    execFileFn: async () => ({ stdout: '/usr/bin/scrcpy', stderr: '' }),
+    spawnFn: (((_command: string, _args?: readonly string[]) => {
+      queueMicrotask(() => {
+        for (let i = 1; i <= 25; i += 1) {
+          process.stderr.write(`chunk${String(i).padStart(2, '0')};`);
+        }
+        process.exitCode = 1;
+        process.emit('exit', 1, null);
+      });
+      return process as unknown as ReturnType<typeof import('child_process').spawn>;
+    }) as unknown) as typeof import('child_process').spawn,
+    delayFn: async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.startRecordingProcess({
+        deviceId: 'emulator-5554',
+        filePath: '/tmp/run_case.mp4',
+        recordingRequest: new RecordingRequest({
+          runId: 'run',
+          testId: 'case',
+          apiKey: 'key',
+        }),
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      // The tail survives...
+      assert.match(error.message, /chunk06;/);
+      assert.match(error.message, /chunk25;/);
+      // ...and the oldest chunks beyond the bound are dropped.
+      assert.doesNotMatch(error.message, /chunk01;/);
+      assert.doesNotMatch(error.message, /chunk05;/);
+      return true;
+    },
+  );
+});
+
 test('AndroidRecordingProvider reports SIGINT interruption instead of scrcpy-server push noise', async () => {
   // Repro of the original bug: a SIGINT during startup produced a "1 file pushed" red
   // herring because _formatStartupExit previously led with raw stdout. Now the signal is
