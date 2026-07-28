@@ -1,0 +1,2 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-28T02:03:04Z"}
+{"args":"Add a tsc --noEmit typecheck stage and close the --if-present silent-skip gap in the CI gate; clear the zero-behaviour-change backlog: 3 dead-code removals, the unlink-order pin, and 4 boundary-value assertions.","cmd":"fab-new","event":"command","ts":"2026-07-28T02:03:04Z"}
