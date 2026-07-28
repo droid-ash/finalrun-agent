@@ -1,0 +1,11 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-28T05:50:28Z"}
+{"args":"Fix the six deferred error-path defects accumulated across changes #155-#163, batched two per package (device-node, cli, cloud-core), each with a test","cmd":"fab-new","event":"command","ts":"2026-07-28T05:50:28Z"}
+{"delta":"+4.6","event":"confidence","score":4.6,"trigger":"calc-score","ts":"2026-07-28T05:54:24Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-28T05:56:28Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-28T05:56:28Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-28T05:57:21Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-28T06:24:32Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-28T06:47:46Z"}
+{"event":"review","result":"passed","ts":"2026-07-28T06:47:46Z"}
+{"delta":"+0.0","event":"confidence","score":4.6,"trigger":"calc-score","ts":"2026-07-28T06:57:08Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-28T06:57:33Z"}

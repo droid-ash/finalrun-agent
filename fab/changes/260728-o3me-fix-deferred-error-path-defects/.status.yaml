@@ -1,0 +1,51 @@
+id: o3me
+name: 260728-o3me-fix-deferred-error-path-defects
+created: 2026-07-28T05:50:28Z
+created_by: ashish-noon
+change_type: fix
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 21
+    acceptance_count: 25
+    acceptance_completed: 25
+confidence:
+    certain: 4
+    confident: 6
+    tentative: 0
+    unresolved: 0
+    score: 4.6
+    fuzzy: true
+    dimensions:
+        signal: 71.5
+        reversibility: 84.0
+        competence: 84.0
+        disambiguation: 77.0
+stage_metrics:
+    intake: {started_at: "2026-07-28T05:50:28Z", driver: fab-new, iterations: 1, completed_at: "2026-07-28T05:56:28Z"}
+    apply: {started_at: "2026-07-28T05:56:28Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T06:24:32Z"}
+    review: {started_at: "2026-07-28T06:24:32Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T06:47:46Z"}
+    hydrate: {started_at: "2026-07-28T06:47:46Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T06:57:33Z"}
+    ship: {started_at: "2026-07-28T06:57:33Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 621
+    deleted: 50
+    net: 571
+    tests:
+        added: 57
+        deleted: 0
+        net: 57
+    computed_at: "2026-07-28T06:57:33Z"
+    computed_at_stage: hydrate
+summary: 'drains the deferred error-path queue: type-safe simctl plist extraction, bounded child-process diagnostic buffers, guarded sessionRunner preconditions, an integral-value submit-timeout contract, and a temp-zip cleanup scope that encloses the non-atomic writeZip'
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-28T06:57:33Z

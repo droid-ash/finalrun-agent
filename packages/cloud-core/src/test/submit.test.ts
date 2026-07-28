@@ -5,6 +5,7 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import AdmZip from 'adm-zip';
 import { submitRun, type SubmitRunInput } from '../submit.js';
+import { prepareAppForUpload } from '../appBundle.js';
 
 // Characterization tests: these pin submitRun's CURRENT behavior so the
 // phase-extraction refactor provably preserves it. Only globalThis.fetch is
@@ -434,6 +435,73 @@ test('submitRun removes the temp app zip when spec zipping fails before the uplo
   assert.deepEqual(tempZipArtifacts(), before, 'a pre-upload failure must not orphan the temp app zip');
 });
 
+test('prepareAppForUpload removes the temp app zip when a failure follows its acquisition', (t) => {
+  // Regression test for the acquisition-side orphan: writeZip creates the
+  // temp file, and the caller can only clean it up once the path is RETURNED
+  // (isTempZip contract). A throw between acquisition and return — statSync
+  // here — used to exit the function with the zip orphaned in os.tmpdir().
+  // The post-acquisition windows inside submitRun are pinned above; the
+  // window *inside* writeZip is pinned by the test that follows this one.
+  const before = tempZipArtifacts();
+  const bundlePath = path.join(makeTempDir('appdir'), 'Orphan.app');
+  fs.mkdirSync(bundlePath);
+  fs.writeFileSync(path.join(bundlePath, 'Info.plist'), 'plist');
+
+  // Scoped to the temp-zip path: AdmZip itself stats the bundle's files while
+  // adding the folder, and a blanket throw would fire BEFORE writeZip
+  // acquires anything (leaving no orphan to regress). Only the size probe on
+  // the just-written zip may throw.
+  const realStatSync = fs.statSync;
+  t.mock.method(fs, 'statSync', ((...args: Parameters<typeof fs.statSync>) => {
+    if (String(args[0]).includes('finalrun-app-')) {
+      throw new Error('EACCES: stat blocked');
+    }
+    return realStatSync(...args);
+  }) as typeof fs.statSync);
+  assert.throws(() => prepareAppForUpload(bundlePath), /EACCES: stat blocked/);
+  assert.deepEqual(
+    tempZipArtifacts(),
+    before,
+    'a failure between acquisition and return must not orphan the temp app zip',
+  );
+});
+
+test('prepareAppForUpload removes the temp app zip when writeZip itself fails midway', (t) => {
+  // Regression test for the window INSIDE the acquisition call. Treating
+  // writeZip as atomic is wrong: adm-zip's writeFileTo does
+  // openSync(path,'w') -> writeSync -> closeSync -> chmodSync
+  // (node_modules/adm-zip/util/utils.js), so the file exists from the openSync
+  // onward and a throw from any later step leaves it behind. A cleanup scope
+  // opening *after* writeZip can never see that file, which is why the scope
+  // opens before the call instead.
+  //
+  // chmodSync is the seam because it runs last — the zip is fully written and
+  // closed by then, so this pins the orphan of a COMPLETE file, not a partial
+  // one. adm-zip holds `this.fs = require('fs')`, the same cached module
+  // object this stub patches, so the interception reaches inside the library.
+  const before = tempZipArtifacts();
+  const bundlePath = path.join(makeTempDir('appdir'), 'HalfWritten.app');
+  fs.mkdirSync(bundlePath);
+  fs.writeFileSync(path.join(bundlePath, 'Info.plist'), 'plist');
+
+  // Scoped to the temp-zip path for the same reason as the test above: the
+  // bundle dir is finalrun-submit-test-appdir-*, which does not contain the
+  // finalrun-app- substring, so only the output zip's chmod is blocked.
+  const realChmodSync = fs.chmodSync;
+  t.mock.method(fs, 'chmodSync', ((...args: Parameters<typeof fs.chmodSync>) => {
+    if (String(args[0]).includes('finalrun-app-')) {
+      throw new Error('EPERM: chmod blocked');
+    }
+    return realChmodSync(...args);
+  }) as typeof fs.chmodSync);
+  assert.throws(() => prepareAppForUpload(bundlePath), /EPERM: chmod blocked/);
+  assert.deepEqual(
+    tempZipArtifacts(),
+    before,
+    'a failure inside writeZip must not orphan the temp app zip',
+  );
+});
+
 test('submitRun throws when the server responds 201 but rejects the submission', async () => {
   const body = JSON.stringify({ success: false, error: 'quota exceeded' });
   const stub = installFetchStub(() => new Response(body, { status: 201 }));
@@ -577,15 +645,18 @@ test('the module throws at load time when FINALRUN_SUBMIT_TIMEOUT_MS is invalid'
       process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = invalid;
       assert.throws(reload, /Invalid FINALRUN_SUBMIT_TIMEOUT_MS/, `expected throw for "${invalid}"`);
     }
-    process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = '60000';
-    assert.doesNotThrow(reload, 'a valid override must be accepted');
-    // Characterization, not endorsement: the guard is `!Number.isFinite(n) || n <= 0`,
-    // so a fractional value is ACCEPTED even though the error text promises
-    // "a positive integer". Pinned here so the mismatch is visible and cannot
-    // change unnoticed; reconciling message and parser is a behaviour change,
-    // recorded as follow-up in this change's plan.md.
+    for (const valid of ['60000', '1e3', '0x10']) {
+      process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = valid;
+      assert.doesNotThrow(reload, `expected "${valid}" to be accepted`);
+    }
+    // The parser now keeps the promise its error text makes ("a positive
+    // integer"): a fractional value is rejected. The accepted set above pins
+    // the other direction of the narrowing — `1e3` and `0x10` denote the
+    // integers 1000 and 16, and the guard tests the parsed VALUE
+    // (Number.isInteger), never the literal's spelling, so exponent and hex
+    // spellings of integral values keep working.
     process.env['FINALRUN_SUBMIT_TIMEOUT_MS'] = '1.5';
-    assert.doesNotThrow(reload, 'fractional values are accepted by the current parser');
+    assert.throws(reload, /Invalid FINALRUN_SUBMIT_TIMEOUT_MS/, 'fractional values are rejected');
   } finally {
     if (original === undefined) {
       delete process.env['FINALRUN_SUBMIT_TIMEOUT_MS'];

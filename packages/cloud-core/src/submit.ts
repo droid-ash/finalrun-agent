@@ -60,7 +60,10 @@ function parseSubmitTimeoutMs(defaultMs: number): number {
   const raw = process.env['FINALRUN_SUBMIT_TIMEOUT_MS'];
   if (raw === undefined || raw === '') return defaultMs;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  // Number.isInteger tests the parsed VALUE (it also rejects NaN/±Infinity),
+  // so integral spellings like '1e3' or '0x10' stay accepted while
+  // fractional values are rejected — matching the message's promise.
+  if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(
       `Invalid FINALRUN_SUBMIT_TIMEOUT_MS=${JSON.stringify(raw)}: must be a positive integer (milliseconds).`,
     );

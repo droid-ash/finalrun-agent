@@ -199,7 +199,7 @@ async function establishDeviceSession(params: {
   }
 
   const deviceInfo = params.selectedEntry.deviceInfo;
-  const platform = deviceInfo.isAndroid ? PLATFORM_ANDROID : 'ios';
+  const platform = deviceInfo.getPlatform();
   Logger.i(`Using device: ${params.selectedEntry.displayName}`);
 
   Logger.i('Setting up device...');
@@ -328,8 +328,11 @@ async function installAppOverride(params: {
     if (!params.deviceInfo.id) {
       throw new Error('Android device serial is required to install an app override.');
     }
+    if (!params.adbPath) {
+      throw new Error('adb path is required to install an Android app override.');
+    }
     const installed = await params.deviceNode.installAndroidApp(
-      params.adbPath!,
+      params.adbPath,
       params.deviceInfo.id,
       params.appOverridePath,
     );

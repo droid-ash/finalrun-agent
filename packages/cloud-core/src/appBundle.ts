@@ -90,16 +90,34 @@ function zipAppBundle(appPath: string, basename: string): PreparedApp {
   // what makes concurrent submissions collision-proof (same-millisecond runs
   // would otherwise share one path and corrupt/unlink each other's upload).
   const zipPath = path.join(os.tmpdir(), `finalrun-app-${Date.now()}-${randomUUID()}.zip`);
-  zip.writeZip(zipPath);
-  const size = fs.statSync(zipPath).size;
-  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  Logger.i(`Zipped ${basename} in ${elapsed}s`);
 
-  return {
-    uploadPath: zipPath,
-    filename: `${basename}.zip`,
-    size,
-    isTempZip: true,
-    platformHint: 'ios',
-  };
+  // The cleanup scope opens BEFORE writeZip, not after it. Acquisition begins
+  // *inside* writeZip — adm-zip does openSync(path,'w') to create the file,
+  // then writeSync/closeSync/chmodSync — so a throw partway through leaves a
+  // created file that a scope opening after the call could never see. The
+  // caller can only release the zip once the path is RETURNED (isTempZip
+  // contract), so anything that throws before the return must unlink here.
+  // The success path must NOT unlink; unlink of a never-created file is
+  // swallowed below, which is what makes the wider scope free.
+  try {
+    zip.writeZip(zipPath);
+    const size = fs.statSync(zipPath).size;
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    Logger.i(`Zipped ${basename} in ${elapsed}s`);
+
+    return {
+      uploadPath: zipPath,
+      filename: `${basename}.zip`,
+      size,
+      isTempZip: true,
+      platformHint: 'ios',
+    };
+  } catch (error) {
+    try {
+      fs.unlinkSync(zipPath);
+    } catch {
+      // ignore cleanup errors
+    }
+    throw error;
+  }
 }
