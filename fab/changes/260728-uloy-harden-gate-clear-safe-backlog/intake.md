@@ -126,7 +126,7 @@ precisely because the originals could not.
 
 **Required.** `docs/memory/ci/pr-quality-gate.md` § "PR CI gate stages" carries a **Coverage
 boundary** paragraph and a scenario (*"a type error clears every stage of the gate"*) written in
-#162. This change falsifies both — deliberately, since closing that hole is the point. The
+PR #162. This change falsifies both — deliberately, since closing that hole is the point. The
 requirement must gain the typecheck stage, the scenario must be replaced or inverted, and the
 `--if-present` half of the same paragraph must reflect whatever §2 lands.
 
@@ -157,7 +157,7 @@ Hydrate should also check whether the dead-code removals touch anything document
 | # | Grade | Decision | Rationale | Scores |
 |---|-------|----------|-----------|--------|
 | 1 | Certain | Scope is gate hardening + the zero-behaviour-change backlog only | User chose this from a four-way triage; the six error-path fixes and four decisions stay queued | S:95 R:85 A:90 D:95 |
-| 2 | Confident | Typecheck all packages explicitly, not just `report-web` | The other five typecheck only as a build side-effect; a future switch to `tsup`/`vite` would silently lose it exactly as `report-web` did | S:75 R:85 A:85 D:80 |
+| 2 | Certain | Typecheck all packages explicitly, not just `report-web` | The other five typecheck only as a build side-effect; a future switch to `tsup`/`vite` would silently lose it exactly as `report-web` did | S:75 R:85 A:85 D:80 |
 | 3 | Certain | Do NOT wire typecheck via `--workspaces --if-present` | That reintroduces the exact silent-skip gap §2 exists to close | S:90 R:85 A:95 D:95 |
 | 4 | Confident | The `--if-present` mechanism is left to apply, with constraints | Several reasonable shapes (allow-list, explicit no-op script); the binding requirements are that an unintentional skip is reported and that no blanket always-succeed shell fallback is used | S:65 R:85 A:80 D:65 |
 | 5 | Certain | Verify each dead construct is dead before removing it | All four come from prior reviews' surviving mutations; re-confirm rather than trust, since a wrong deletion is a behaviour change | S:90 R:75 A:90 D:90 |
@@ -167,4 +167,4 @@ Hydrate should also check whether the dead-code removals touch anything document
 | 9 | Confident | Expect the typecheck stage to surface pre-existing errors; fix type errors, record behaviour changes | No package's test files have been typechecked under `--noEmit`. A fix that changes behaviour violates this change's premise | S:70 R:75 A:85 D:75 |
 | 10 | Certain | The memory update is REQUIRED | `pr-quality-gate.md`'s Coverage-boundary paragraph and its type-error scenario are deliberately falsified by §1 | S:90 R:85 A:95 D:95 |
 
-10 assumptions (7 certain, 3 confident, 0 tentative, 0 unresolved).
+10 assumptions (8 certain, 2 confident, 0 tentative, 0 unresolved).

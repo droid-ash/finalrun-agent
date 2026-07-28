@@ -8,3 +8,4 @@
 {"event":"review","result":"passed","ts":"2026-07-28T04:37:50Z"}
 {"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-28T04:44:31Z"}
 {"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-28T04:47:34Z"}
+{"delta":"+0.0","event":"confidence","score":4.9,"trigger":"calc-score","ts":"2026-07-28T04:56:21Z"}
