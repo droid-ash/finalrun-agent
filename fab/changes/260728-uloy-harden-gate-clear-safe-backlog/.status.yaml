@@ -2,28 +2,50 @@ id: uloy
 name: 260728-uloy-harden-gate-clear-safe-backlog
 created: 2026-07-28T02:03:04Z
 created_by: ashish-noon
-change_type: feat
+change_type: ci
 issues: []
 progress:
-    intake: active
-    apply: pending
-    review: pending
-    hydrate: pending
-    ship: pending
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
     review-pr: pending
 plan:
-    generated: false
-    task_count: 0
-    acceptance_count: 0
-    acceptance_completed: 0
+    generated: true
+    task_count: 11
+    acceptance_count: 17
+    acceptance_completed: 17
 confidence:
-    certain: 0
-    confident: 0
+    certain: 8
+    confident: 2
     tentative: 0
     unresolved: 0
-    score: 0.0
+    score: 4.9
+    fuzzy: true
+    dimensions:
+        signal: 84.0
+        reversibility: 83.0
+        competence: 90.5
+        disambiguation: 87.5
 stage_metrics:
-    intake: {started_at: "2026-07-28T02:03:04Z", driver: fab-new, iterations: 1}
+    intake: {started_at: "2026-07-28T02:03:04Z", driver: fab-new, iterations: 1, completed_at: "2026-07-28T03:59:23Z"}
+    apply: {started_at: "2026-07-28T03:59:23Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:24:38Z"}
+    review: {started_at: "2026-07-28T04:24:38Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:37:50Z"}
+    hydrate: {started_at: "2026-07-28T04:37:50Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:44:31Z"}
+    ship: {started_at: "2026-07-28T04:44:31Z", driver: fab-fff, iterations: 1}
 prs: []
+change_type_source: explicit
+true_impact:
+    added: 32
+    deleted: 0
+    net: 32
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-28T04:44:31Z"
+    computed_at_stage: hydrate
+summary: CI gate gains a typecheck stage (tsc --noEmit per package) and drops --if-present from every workspace fan-out (local-runtime declares explicit no-ops); four provably-dead constructs removed and five mutation-verified assertions added
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-28T02:03:04Z
+last_updated: 2026-07-28T04:44:31Z

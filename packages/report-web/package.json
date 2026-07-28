@@ -32,6 +32,7 @@
     "build:app": "vite build",
     "build:lib": "tsup && node scripts/build-styles.mjs",
     "build": "npm run build:lib && npm run build:app",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
     "test": "node ./scripts/runTests.mjs",
     "prepublishOnly": "npm run build"

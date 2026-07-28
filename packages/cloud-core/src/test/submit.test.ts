@@ -265,6 +265,42 @@ test('submitRun zips a .app directory for upload and removes both temp zips on s
   assert.deepEqual(tempZipArtifacts(), before, 'spec zip and temp app zip must both be removed');
 });
 
+test('submitRun unlinks the spec zip before the temp app zip (inner finally first)', async () => {
+  // Order pin: submitRun's nested finally scopes guarantee the inner (spec
+  // zip) release runs before the outer (app zip) one. The tmpdir-snapshot
+  // assertions in the surrounding tests compare final SETS and cannot see a
+  // swapped order, so the sequence is pinned here explicitly via a delegating
+  // spy on fs.unlinkSync (observation only — the real unlink still runs).
+  const bundlePath = path.join(makeTempDir('appdir'), 'Ordered.app');
+  fs.mkdirSync(bundlePath);
+  fs.writeFileSync(path.join(bundlePath, 'Info.plist'), 'plist');
+
+  const unlinkedTempZips: string[] = [];
+  const realUnlinkSync = fs.unlinkSync;
+  fs.unlinkSync = ((target: fs.PathLike) => {
+    const name = path.basename(String(target));
+    if (/^finalrun-(cloud|app)-.*\.zip$/.test(name)) {
+      unlinkedTempZips.push(name);
+    }
+    return realUnlinkSync(target);
+  }) as typeof fs.unlinkSync;
+  const stub = installFetchStub(() => okResponse());
+  try {
+    await submitRun(makeInput({ appPath: bundlePath }));
+  } finally {
+    fs.unlinkSync = realUnlinkSync;
+    stub.restore();
+  }
+
+  assert.equal(
+    unlinkedTempZips.length,
+    2,
+    `exactly the two temp zips are unlinked, saw: ${JSON.stringify(unlinkedTempZips)}`,
+  );
+  assert.match(unlinkedTempZips[0], /^finalrun-cloud-/, 'the spec zip (inner finally) is unlinked first');
+  assert.match(unlinkedTempZips[1], /^finalrun-app-/, 'the temp app zip (outer finally) is unlinked second');
+});
+
 test('submitRun zips only the checked test specs when no config or env file exists', async () => {
   const stub = installFetchStub(() => okResponse());
   try {

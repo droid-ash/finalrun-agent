@@ -256,7 +256,7 @@ export class ActionExecutor {
           const action = new TapAction({
             point: new Point({ x: point.x, y: point.y }),
           });
-          await this._runSingleDeviceAction(action, input.traceStep, 'Tap action failed');
+          await this._runSingleDeviceAction(action, input.traceStep);
 
           if (index < repeatCount - 1) {
             await this._delay(delayBetweenTapMs);
@@ -285,7 +285,7 @@ export class ActionExecutor {
       point: new Point({ x: grounded.value.x, y: grounded.value.y }),
     });
     return this._finishWithDevicePhase(input, spans, () =>
-      this._runSingleDeviceAction(action, input.traceStep, 'Long press action failed'),
+      this._runSingleDeviceAction(action, input.traceStep),
     );
   }
 
@@ -409,11 +409,7 @@ export class ActionExecutor {
       const tapAction = new TapAction({
         point: new Point({ x: focusPoint.x, y: focusPoint.y }),
       });
-      await this._runSingleDeviceAction(
-        tapAction,
-        input.traceStep,
-        'Failed to focus input field',
-      );
+      await this._runSingleDeviceAction(tapAction, input.traceStep);
       await this._delay(300);
     }
 
@@ -421,7 +417,7 @@ export class ActionExecutor {
       value: textToType,
       shouldEraseText: input.clearText ?? true,
     });
-    await this._runSingleDeviceAction(action, input.traceStep, 'Failed to enter text');
+    await this._runSingleDeviceAction(action, input.traceStep);
   }
 
   private async _executeScroll(
@@ -477,7 +473,7 @@ export class ActionExecutor {
     }
 
     return this._finishWithDevicePhase(input, spans, () =>
-      this._runSingleDeviceAction(scrollResult.data!, input.traceStep, 'Scroll action failed'),
+      this._runSingleDeviceAction(scrollResult.data!, input.traceStep),
     );
   }
 
@@ -535,7 +531,7 @@ export class ActionExecutor {
     return this._finishWithDevicePhase(
       input,
       spans,
-      () => this._runSingleDeviceAction(action, input.traceStep, 'Launch app action failed'),
+      () => this._runSingleDeviceAction(action, input.traceStep),
       {
         successDetail: () => `package=${packageName}`,
       },
@@ -611,7 +607,7 @@ export class ActionExecutor {
     return this._finishWithDevicePhase(
       input,
       spans,
-      () => this._runSingleDeviceAction(action, input.traceStep, 'Set location action failed'),
+      () => this._runSingleDeviceAction(action, input.traceStep),
       {
         successDetail: () => `lat=${lat.trim()} long=${long.trim()}`,
       },
@@ -711,7 +707,7 @@ export class ActionExecutor {
 
     const action = new DeeplinkAction({ deeplink });
     return this._finishWithDevicePhase(input, spans, () =>
-      this._runSingleDeviceAction(action, input.traceStep, 'Deeplink action failed'),
+      this._runSingleDeviceAction(action, input.traceStep),
     );
   }
 
@@ -728,7 +724,7 @@ export class ActionExecutor {
   ): Promise<ActionOutput> {
     const spans: SpanTiming[] = [];
     return this._finishWithDevicePhase(input, spans, () =>
-      this._runSingleDeviceAction(action, input.traceStep, 'Device action failed'),
+      this._runSingleDeviceAction(action, input.traceStep),
     );
   }
 
@@ -768,11 +764,12 @@ export class ActionExecutor {
   private async _runSingleDeviceAction(
     action: ExecutableDeviceAction,
     traceStep: number | undefined,
-    failureMessage: string,
   ): Promise<void> {
     const result = await this._executeDeviceAction(action, traceStep);
     if (!result.success) {
-      throw new Error(result.error ?? failureMessage);
+      // _executeDeviceAction always substitutes 'Action failed' for a missing
+      // driver message, so result.error is never nullish here.
+      throw new Error(result.error);
     }
   }
 
@@ -854,7 +851,7 @@ export class ActionExecutor {
       : new TapAction({ point });
 
     return this._finishWithDevicePhase(input, spans, () =>
-      this._runSingleDeviceAction(action, input.traceStep, `${actionType} action failed`),
+      this._runSingleDeviceAction(action, input.traceStep),
     );
   }
 

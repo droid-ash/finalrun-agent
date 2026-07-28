@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "report-web is a Vite React SPA + importable UI library; pure view-model/log/format/route logic under src/ui and src/ is pinned by characterization tests; the device-log viewer is DeviceLogPanel.tsx; manifest loading and the 500-line device-log tail read live in packages/cli/src/reportViewModel.ts"
+description: "report-web is a Vite React SPA + importable UI library; pure view-model/log/format/route logic under src/ui and src/ is pinned by characterization tests; the published @finalrun/report-web/ui barrel's input contract is its declared types, not defensive guards; the device-log viewer is DeviceLogPanel.tsx; manifest loading and the 500-line device-log tail read live in packages/cli/src/reportViewModel.ts"
 ---
 # Report Rendering (report-web)
 
@@ -92,3 +92,23 @@ A DOM environment is a testing-infrastructure decision, not a backfill.
 tests-only change; testing through the React components — needs that same infrastructure to reach
 logic that is directly importable today.
 *Introduced by*: 260727-e5nk-backfill-report-web-logic-tests
+
+### The `ui` barrel's input contract is its declared types, not defensive guards
+**Decision**: A guard that is unreachable under a function's declared parameter types is removed
+even when that function is re-exported through the published `@finalrun/report-web/ui` barrel:
+`parseDeviceLogLines(logText: string, …)` carries no `!logText` early return, because
+`''.split('\n')` yields `['']` and the zero-length filter already drops it. Runtime input
+validation at the barrel is a deliberate, tested decision per function — never a leftover guard
+kept because the export is public.
+**Why**: A published barrel widens who the callers are, so "unreachable" is only true up to the
+declared types: an untyped downstream consumer passing `undefined` gets a `TypeError` where the
+guard returned `[]`. That is a semantic change at the package boundary even though the
+`logText: string` contract makes it none, which is exactly why the removal has to be argued rather
+than swept up with in-repo dead code — check the barrel (`src/ui/index.ts`) before deleting a guard
+on any exported function, not just the in-repo call sites. Leaving it in place is the worse end:
+untestable code that states no intent, which the next reader deletes with less scrutiny.
+**Rejected**: (a) keeping unreachable guards on everything the barrel exports — the type checker
+already proves them unnecessary, and blanket defensiveness hides which inputs are genuinely
+validated; (b) widening the parameter to `string | undefined` and coercing — a real behaviour
+change to a published signature, which belongs in a change that argues for it with tests.
+*Introduced by*: 260728-uloy-harden-gate-clear-safe-backlog

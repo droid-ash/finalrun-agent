@@ -53,7 +53,8 @@ export function parseDeviceLogLines(
   logText: string,
   recordingStartedAt?: string,
 ): ParsedLogLine[] {
-  if (!logText) return [];
+  // No empty-string guard needed: ''.split('\n') yields [''], which the
+  // zero-length filter below drops, so '' already maps to [].
   const recStartMs = recordingStartedAt ? new Date(recordingStartedAt).getTime() : undefined;
   return logText
     .split('\n')

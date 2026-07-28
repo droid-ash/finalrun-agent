@@ -1,5 +1,5 @@
 ---
-description: "PR quality gate (`npm ci` → build → test → lint), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
+description: "PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
 ---
 # Ci Documentation
 
@@ -7,4 +7,4 @@ description: "PR quality gate (`npm ci` → build → test → lint), the commit
 
 | File | Description |
 |------|-------------|
-| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` → build → test → lint via .github/workflows/ci.yml and never typechecks — type errors survive report-web's tsup/vite build; code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, extract phases behind a phase-outcome union with per-acquisition `finally`, and prove equivalence with a differential harness. |
+| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` → build → typecheck → test → lint via .github/workflows/ci.yml — every workspace typechecks via `tsc --noEmit`, no workspace step uses `--if-present` (a lost script fails loudly; local-runtime holds explicit no-ops); code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, and prove equivalence differentially. |

@@ -333,6 +333,17 @@ test('resolveStepReasoning returns the first candidate that differs from the tit
   assert.equal(resolveStepReasoning(step), 'Open the menu first');
 });
 
+test('resolveStepReasoning prefers think over plan when both differ from the title', () => {
+  // Precedence pin: the existing tests only exercise think when it EQUALS the
+  // title, so swapping the think/plan candidate order would survive them.
+  const step = makeStep({
+    naturalLanguageAction: 'Tap the button',
+    thought: { think: 'Check the toolbar first', plan: 'Open the menu first' },
+    reason: 'fallback reason',
+  });
+  assert.equal(resolveStepReasoning(step), 'Check the toolbar first');
+});
+
 test('resolveStepReasoning falls back to reason and trims whitespace', () => {
   const step = makeStep({ naturalLanguageAction: 'Tap', reason: '  do it carefully  ' });
   assert.equal(resolveStepReasoning(step), 'do it carefully');
@@ -357,6 +368,10 @@ test('formatRelativeTime buckets minutes/hours/days/weeks against a frozen clock
     assert.equal(formatRelativeTime('2026-07-27T11:59:30.000Z'), 'just now');
     assert.equal(formatRelativeTime('2026-07-27T11:15:00.000Z'), '45m');
     assert.equal(formatRelativeTime('2026-07-27T09:00:00.000Z'), '3h');
+    // 24h→day boundary from both sides: 23h stays in the hours bucket, exactly
+    // 24h tips into days (the existing 3h/3d values cannot see a moved boundary).
+    assert.equal(formatRelativeTime('2026-07-26T13:00:00.000Z'), '23h');
+    assert.equal(formatRelativeTime('2026-07-26T12:00:00.000Z'), '1d');
     assert.equal(formatRelativeTime('2026-07-24T12:00:00.000Z'), '3d');
     assert.equal(formatRelativeTime('2026-07-06T12:00:00.000Z'), '3w');
     assert.equal(formatRelativeTime('2026-07-27T13:00:00.000Z'), 'just now');
@@ -370,6 +385,9 @@ test('formatVideoTimestamp renders mm:ss with zero and undefined clamped to 00:0
   assert.equal(formatVideoTimestamp(0), '00:00');
   assert.equal(formatVideoTimestamp(-500), '00:00');
   assert.equal(formatVideoTimestamp(1499), '00:01');
+  // Truncation boundary: 1900ms must truncate DOWN to 00:01 (1499 rounds the
+  // same under Math.round and Math.floor; only this value pins the floor).
+  assert.equal(formatVideoTimestamp(1900), '00:01');
   assert.equal(formatVideoTimestamp(65000), '01:05');
   assert.equal(formatVideoTimestamp(3661000), '61:01');
 });

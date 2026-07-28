@@ -242,7 +242,6 @@ export class AIAgent {
 
     const parsedResponse = await this._retryLLMAttempts<PlannerResponse>(
       { name: 'Planner', suffix: '' },
-      'Planner failed after all retry attempts',
       async (attempt, maxAttempts) => {
         const llmOutcome = await this._runPlannerLLMPhase(
           request,
@@ -284,22 +283,19 @@ export class AIAgent {
 
   /**
    * Shared retry engine for plan/ground: runs up to MAX_LLM_ATTEMPTS attempts,
-   * logging a retry warning between attempts and rethrowing the last error when
-   * attempts are exhausted. A FatalProviderError thrown by an attempt propagates
-   * immediately (no retry).
+   * logging a retry warning between attempts and rethrowing the failing
+   * attempt's error once attempts are exhausted. A FatalProviderError thrown
+   * by an attempt propagates immediately (no retry).
    */
   private async _retryLLMAttempts<T>(
     label: { name: string; suffix: string },
-    exhaustedMessage: string,
     runAttempt: (attempt: number, maxAttempts: number) => Promise<LLMAttemptOutcome<T>>,
   ): Promise<T> {
-    let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
       const outcome = await runAttempt(attempt, MAX_LLM_ATTEMPTS);
       if (outcome.kind === 'ok') {
         return outcome.value;
       }
-      lastError = outcome.error;
       if (attempt >= MAX_LLM_ATTEMPTS) {
         throw outcome.error;
       }
@@ -309,7 +305,9 @@ export class AIAgent {
         }`,
       );
     }
-    throw lastError ?? new Error(exhaustedMessage);
+    // Unreachable while MAX_LLM_ATTEMPTS >= 1: the final attempt above either
+    // returns or throws. TypeScript still needs a terminal throw here.
+    throw new Error(`${label.name} failed after all retry attempts`);
   }
 
   /** Run one planner LLM call inside its 'planning.llm' trace phase. */
@@ -458,7 +456,6 @@ export class AIAgent {
 
     const { response: parsed, llmCall: lastLLMCall } = await this._retryLLMAttempts(
       { name: 'Grounder', suffix: ` for feature=${request.feature}` },
-      'Grounder failed after all retry attempts',
       (attempt, maxAttempts) =>
         this._runGrounderAttempt(
           request,
