@@ -1,5 +1,6 @@
 # Archive Index
 
+- **260727-e5nk-backfill-report-web-logic-tests** — Close the Last Zero-Coverage Package — `report-web` Logic Tests
 - **260727-18tg-characterize-refactor-cli-giants** — Characterize and Refactor the Two Untested `cli` Giants
 - **260727-6z9b-batch-refactor-device-node** — Batched Refactor of `device-node` — 23 Warnings
 - **260726-fnwt-batch-refactor-goal-executor** — Batched Refactor of `goal-executor` — 19 Warnings in One Change

@@ -32,6 +32,7 @@
   "scripts": {
     "build": "npm run clean && tsc && node ./scripts/copyReportApp.mjs && node -e \"require('fs').copyFileSync('package.json','dist/package.json')\"",
     "clean": "rm -rf dist proto tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "tsx bin/finalrun.ts",
     "dev": "tsx --tsconfig ../../tsconfig.dev.json bin/finalrun.ts",
     "test": "node ./scripts/runTests.mjs"

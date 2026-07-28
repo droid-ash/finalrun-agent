@@ -237,7 +237,9 @@ function normalizeStepText(value: string | undefined): string | undefined {
 }
 
 export function formatRelativeTime(timestamp: string): string {
-  const deltaMs = Math.max(0, Date.now() - new Date(timestamp).getTime());
+  // No clamp needed: a future timestamp floors to a negative totalMinutes,
+  // which the `< 1` branch below maps to 'just now' exactly as 0 would.
+  const deltaMs = Date.now() - new Date(timestamp).getTime();
   const totalMinutes = Math.floor(deltaMs / 60000);
   if (totalMinutes < 1) return 'just now';
   if (totalMinutes < 60) return `${totalMinutes}m`;

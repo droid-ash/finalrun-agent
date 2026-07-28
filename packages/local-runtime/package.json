@@ -5,6 +5,9 @@
   "description": "Per-platform runtime bundle for local FinalRun test execution. Builds finalrun-runtime-<version>-<platform>.tar.gz with on-disk assets (driver APKs/iOS zips, gRPC proto, Vite SPA dist) that the Bun-compiled CLI binary needs at runtime. Not published to npm — uploaded to GitHub Releases.",
   "license": "Apache-2.0",
   "scripts": {
-    "build:tarball": "node scripts/buildRuntimeTarball.mjs"
+    "build:tarball": "node scripts/buildRuntimeTarball.mjs",
+    "build": "echo 'local-runtime: intentional no-op — this workspace packages release tarballs via build:tarball and has no src/ to compile'",
+    "test": "echo 'local-runtime: intentional no-op — this workspace packages release tarballs and has nothing to test (no src/)'",
+    "typecheck": "echo 'local-runtime: intentional no-op — this workspace contains no TypeScript'"
   }
 }

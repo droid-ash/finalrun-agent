@@ -19,6 +19,9 @@ test('formatLongDuration renders 0s for missing, zero, and negative durations', 
 test('formatLongDuration rounds to whole seconds', () => {
   assert.equal(formatLongDuration(499), '0s');
   assert.equal(formatLongDuration(1400), '1s');
+  // Round-up boundary: 1600ms must round UP to 2s. 499/1400 behave the same
+  // under Math.round and Math.floor, so only this value pins the round-up.
+  assert.equal(formatLongDuration(1600), '2s');
   assert.equal(formatLongDuration(59000), '59s');
 });
 

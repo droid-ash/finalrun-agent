@@ -1,13 +1,14 @@
 name: CI
 
-# PR quality gate: build → test → lint on every pull request targeting main,
-# plus push to main as a post-merge safety net.
+# PR quality gate: build → typecheck → test → lint on every pull request
+# targeting main, plus push to main as a post-merge safety net.
 #
-# The test step is the gate — a failing test fails the run. The lint step is
-# non-blocking in phase 1: the code-quality rules (max-lines-per-function,
-# max-depth, complexity, no-unused-vars, prefer-const) land at `warn`
-# severity, and eslint exits 0 on warnings-only output. Promotion to `error`
-# is a deliberate follow-up once existing offenders are refactored.
+# The test and typecheck steps are the gate — a failing test or a type error
+# fails the run. The lint step is non-blocking in phase 1: the code-quality
+# rules (max-lines-per-function, max-depth, complexity, no-unused-vars,
+# prefer-const) land at `warn` severity, and eslint exits 0 on warnings-only
+# output. Promotion to `error` is a deliberate follow-up once existing
+# offenders are refactored.
 on:
   pull_request:
     branches: [main]
@@ -35,9 +36,22 @@ jobs:
       - run: npm ci
 
       # Package test scripts run against compiled output (dist/), so the
-      # build must happen before tests.
+      # build must happen before tests. Deliberately NOT --if-present: every
+      # workspace declares a build script (local-runtime's is an explicit
+      # no-op), so a workspace that loses its script fails the run loudly
+      # instead of being skipped in silence.
       - name: Build all workspaces
-        run: npm run build --workspaces --if-present
+        run: npm run build --workspaces
+
+      # Typecheck every workspace explicitly (tsc --noEmit -p tsconfig.json
+      # per package, fanned out WITHOUT --if-present). This is the one stage
+      # that typechecks report-web at all (its tsup/vite build never runs
+      # tsc); for the five tsc-building packages it is redundant with their
+      # build, deliberately — so a future build-tool switch cannot silently
+      # drop the check. It runs after build because dependent
+      # packages resolve @finalrun/* types from built dist/ declarations.
+      - name: Typecheck all workspaces
+        run: npm run typecheck
 
       - name: Run tests (the PR gate)
         run: npm run test:workspaces
