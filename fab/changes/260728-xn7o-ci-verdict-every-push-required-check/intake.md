@@ -207,9 +207,9 @@ No source, no tests, no dependencies. The behavioural change is entirely in CI s
 change's own PR must show a completed `test` run for **each** of its pushes, with none cancelled.
 *(Corrected during review: **three** rapid pushes are the discriminating case, not two — two
 pushes yield one in-progress and one pending run and both still complete even with a group present,
-so two cannot detect pending-cancellation. See `plan.md` R5.)* Two pushes in quick succession are
-the discriminating case: on `main` today the first would be
-cancelled; after this change both must complete. Apply SHALL record the run IDs and conclusions.
+so two cannot detect pending-cancellation. See `plan.md` R5.)* Three rapid pushes are the
+discriminating case: with the old configuration the third would evict the pending second; after
+this change all three must complete. Apply SHALL record the run IDs and conclusions.
 
 **Ordering risk.** PR #164 is open and unmerged, and it touches both `ci.yml` (a comment naming
 `local-runtime`'s no-op typecheck) and `docs/memory/ci/pr-quality-gate.md`. This change branches

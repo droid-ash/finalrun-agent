@@ -13,7 +13,7 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 ## Requirements
 
 ### Requirement: PR CI gate stages
-`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces` → `npm run typecheck` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (the dist-discovering runners execute compiled output — see the runner contract below) and MUST precede typecheck (dependent packages resolve `@finalrun/*` types from built `dist/` declarations). The **test and typecheck steps are the gate** — a failing test or a type error fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow carries **no `concurrency` block** — a group left on the default `queue: single` would let GitHub cancel a *pending* same-group run whenever a newer one queues (`cancel-in-progress` governs only the in-progress run), so the block's absence is what keeps a completed verdict per push, with every run starting immediately (see the enforcement requirement below).
+`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces` → `npm run typecheck` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (the dist-discovering runners execute compiled output — see the runner contract below) and MUST precede typecheck (dependent packages resolve `@finalrun/*` types from built `dist/` declarations). The **test and typecheck steps are the gate** — a failing test or a type error fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow carries **no `concurrency` block** — a group left on the default `queue: single` would let GitHub cancel a *pending* same-group run whenever a newer one queues (`cancel-in-progress` governs only the in-progress run), so the block's absence is what keeps a completed verdict per push, with no workflow-level queueing between runs (see the enforcement requirement below).
 
 **Coverage boundary — every workspace typechecks, and no workspace-wide step is `--if-present`.** Every TypeScript package (`common`, `cloud-core`, `device-node`, `goal-executor`, `report-web`, `cli`) carries a `typecheck` script running `tsc --noEmit -p tsconfig.json`, fanned out by the root `typecheck` script as `npm run typecheck --workspaces`. Without `--if-present`, a missing script fails with npm's `Missing script` error and a deleted tsconfig fails with TS5058. The per-package `tsconfig.json` includes test files, so the stage covers source and tests alike: for `report-web` it is the only thing that typechecks either (its `tsup` + `vite` build never runs `tsc`, and `tsconfig.app/lib.json` exclude tests), and for the five `tsc`-building packages it is deliberately redundant with their `tsc` build over `include: ["src/**/*"]`. No workspace-wide invocation carries `--if-present` — not the root `build`, not `test:workspaces`, not the CI build step — so a workspace that *loses* a `build`/`test`/`typecheck` script is reported rather than skipped. `packages/local-runtime` — a tarball-packaging workspace with no `src/` — is the one intentional no-op, and declares it: its `build`/`test`/`typecheck` scripts print why there is nothing to do and exit 0.
 
@@ -37,12 +37,15 @@ Every push to an open PR against `main` MUST produce its own **completed** `test
 documented exceptions, both **fail-closed**, so neither can pass an unverified commit: a
 `[skip ci]` / `[no ci]` token in the head commit's message suppresses the run for `push` and
 `pull_request` events, and a PR with merge conflicts gets no `pull_request` run at all (see below —
-GitHub cannot build the test-merge commit). In either case there is no `test` check, and the
-required check then blocks the merge. Two mechanisms carry the guarantee, and each is half of it:
+GitHub cannot build the test-merge commit). In either case there is no `test` check — but the two
+block differently: for a skipped workflow the required check stays pending and blocks an
+otherwise-mergeable PR, while a conflicting PR is already unmergeable on its own, so the absent
+run there is a *feedback* gap rather than the blocking mechanism (see the recovery note below).
+Two mechanisms carry the guarantee, and each is half of it:
 
 - **Scheduling**: `ci.yml` carries **no `concurrency` key at all**, so no run is ever cancelled
-  or evicted by a newer push — every push's run starts immediately and proceeds to its own
-  terminal conclusion. `cancel-in-progress: false` alone cannot deliver this: it governs only
+  or evicted by a newer push — every push's run is dispatched with no workflow-level queueing
+  (start time is bounded only by runner capacity) and proceeds to its own terminal conclusion. `cancel-in-progress: false` alone cannot deliver this: it governs only
   the **in-progress** run, and GitHub *separately* cancels an existing **pending** run whenever
   a newer one queues into a group on the **default `queue: single`** — so a group left on that
   default loses the middle run of three rapid pushes. `concurrency.queue: max` (up to 100
@@ -50,7 +53,7 @@ required check then blocks the merge. Two mechanisms carry the guarantee, and ea
   the pending runs, but it serialises per-push feedback to N × ~1m30s, caps the guarantee at
   100 pending runs, and protects nothing here — `actions/setup-node`'s cache save fails soft on
   a concurrent write — so removing the block is the trade that keeps feedback fast and the
-  guarantee unconditional. "Every push" itself comes from the `synchronize` activity type,
+  no-cancellation guarantee uncapped. "Every push" itself comes from the `synchronize` activity type,
   which is a **default** `pull_request` activity type (alongside `opened` and `reopened`) — the
   workflow does not opt into it, so the `on:` block stays trigger-minimal. (`release.yml` keeps
   its own `group` + `cancel-in-progress: false` pair deliberately: it is manually dispatched,

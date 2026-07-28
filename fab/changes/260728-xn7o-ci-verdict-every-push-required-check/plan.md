@@ -31,7 +31,9 @@ does what the change requires.
 > inherently unsafe.
 
 **Rejected alternative — `group` + `cancel-in-progress: false` + `queue: max`.** This is a **real,
-valid** configuration and it would also satisfy R1. `concurrency.queue` accepts `single` (the
+valid** configuration and it would also satisfy R1 *up to its cap* — runs beyond the 100-pending
+limit are cancelled again, so it delivers the guarantee in every realistic case here, not
+unconditionally. `concurrency.queue` accepts `single` (the
 default, at most one pending run per group — which is what makes pending-cancellation the default
 behaviour) or `max` (up to 100 pending runs, FIFO); `queue: max` combined with
 `cancel-in-progress: true` is a workflow validation error. Verified against GitHub's workflow-syntax
@@ -47,8 +49,9 @@ reference, not asserted.
 It is rejected on **true grounds**, which are a trade-off rather than an impossibility:
 
 - `queue: max` **serialises** — a run waits for the one ahead of it. Removing the block lets every
-  push start immediately, so per-push feedback arrives in ~1m30s rather than N×1m30s. Feedback speed
-  is the point of a PR gate.
+  push run independently with no workflow-level queueing (start time subject only to runner
+  capacity), so per-push feedback arrives in ~1m30s rather than N×1m30s. Feedback speed is the
+  point of a PR gate.
 - `queue: max` caps pending runs at **100**, beyond which runs are cancelled again. Removing the
   block has no cap, so the guarantee holds unconditionally rather than up to a limit.
 - Nothing here needs serialising. The npm cache was the only candidate justification and
@@ -193,7 +196,7 @@ history carry exactly one, cancelled, CI run. `cancel-in-progress` governs only 
 run, and GitHub separately cancels a *pending* same-group run when a newer one queues into a
 group on the default `queue: single`, so a group left on that default loses the middle run of
 three rapid pushes — removing the block (rather than switching to `queue: max`) keeps every push
-starting immediately with no pending cap. And no `on:` configuration can make GitHub refuse a
+running independently, with no workflow-level queue and no pending cap. And no `on:` configuration can make GitHub refuse a
 merge; only a repo-level protection rule can (here, ruleset `14531661` — classic branch
 protection could too, but `main` carries none), which is why the setting is the load-bearing
 half. The absence failure mode is silent in the safe-looking direction: no failing check reads
@@ -245,6 +248,7 @@ already fixes; (d) strict up-to-date policy — rebase churn on every PR; (e) a 
 - [x] A-006 R5: build, typecheck, test, and lint each exit 0 on this branch with recorded counts, and `ci.yml` parses as valid YAML
       <!-- re-run after the rework-cycle-2 edits: build exit 0; typecheck exit 0; test:workspaces exit 0 with 460 tests / 460 pass / **0 fail** (75+19+91+67+58+150; judged by exit code AND every `ℹ fail` line being 0, never by the count line); lint exit 0 with "✖ 78 problems (0 errors, 78 warnings)". js-yaml 4.3.0 parse exit 0. All four match the branch baseline exactly -->
 - [x] A-007 R5: the plan/PR records that the scheduling proof (one completed `test` run per push, none cancelled, **three** rapid pushes as the discriminating case) is deferred to the change's own PR — apply does not claim it
+- [x] A-011 R1/R5: **the deferred scheduling proof, now discharged on PR #165.** Three pushes inside 95s, each producing its own run, **zero cancelled**: `09ec02e` 10:38:44→10:40:23 success · `eaac482` 10:39:06→10:41:23 success · `934e34f` 10:40:19→10:41:51 success (runs 30351575034 / 30351599177 / 30351681611). Two independent properties are demonstrated, not one: (a) **no eviction** — push #3 queued at 10:40:19 while #2's run was still active, and #2 completed anyway, which is the exact case a group on the default `queue: single` would have lost; (b) **no serialisation** — all three windows overlap, and GitHub permits at most one *running* job per concurrency group, so concurrent runs on one ref prove no group is in effect. `gh run list … --json conclusion` filtered for `cancelled` returns 0.
       <!-- verified (rework cycle 1): R5 states the proof "belongs to the ship/review-pr stages … apply records the deferral, not the proof" and that three pushes are the discriminating case (with a group present, two pushes both complete — one in progress, one pending — so two cannot detect pending-cancellation); Notes § "Deferred verification" now says the same; the memory scenario is likewise the three-push case. No local overclaim anywhere -->
 
 
