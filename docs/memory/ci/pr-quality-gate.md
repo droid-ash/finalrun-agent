@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` → build → typecheck → test → lint via .github/workflows/ci.yml — every workspace typechecks via `tsc --noEmit`, no workspace step uses `--if-present` (a lost script fails loudly; local-runtime holds explicit no-ops); code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, and prove equivalence differentially."
+description: "PR CI gate runs `npm ci` → build → typecheck → test → lint via .github/workflows/ci.yml — every TypeScript workspace typechecks via `tsc --noEmit`, no fan-out uses `--if-present` (a lost script fails loudly; local-runtime holds explicit no-ops); code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, and prove equivalence differentially."
 ---
 # PR Quality Gate (ci)
 

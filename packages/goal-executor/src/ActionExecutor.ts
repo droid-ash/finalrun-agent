@@ -768,7 +768,7 @@ export class ActionExecutor {
     const result = await this._executeDeviceAction(action, traceStep);
     if (!result.success) {
       // _executeDeviceAction always substitutes 'Action failed' for a missing
-      // driver message, so result.error is never nullish here.
+      // or blank driver message, so result.error is never nullish or empty here.
       throw new Error(result.error);
     }
   }
@@ -930,9 +930,13 @@ export class ActionExecutor {
       return { success: true };
     }
 
+    // Treat an empty or whitespace-only driver message as missing — callers
+    // throw result.error directly, so a blank message must never surface as
+    // a blank action error.
+    const message = response.message?.trim() ? response.message : undefined;
     return {
       success: false,
-      error: response.message ?? 'Action failed',
+      error: message ?? 'Action failed',
     };
   }
 
