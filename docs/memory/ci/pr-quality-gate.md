@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` → build → typecheck → test → lint via .github/workflows/ci.yml — every workspace typechecks via `tsc --noEmit`, no workspace step uses `--if-present` (a lost script fails loudly; local-runtime holds explicit no-ops); code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, and prove equivalence differentially."
+description: "PR CI gate (`npm ci` → build → typecheck → test → lint, .github/workflows/ci.yml): every push to an open PR gets a completed verdict (no cancellation) and the `test` check is required to merge (ruleset 14531661, pinned to the Actions app); every workspace typechecks, no `--if-present` fan-outs; code-quality rules are ESLint warnings; strict explicit-discovery test runners (Node 20.19 lacks `node --test` globs); refactors batch tested oversized functions, characterize untested ones first."
 ---
 # PR Quality Gate (ci)
 
@@ -8,12 +8,12 @@ description: "PR CI gate runs `npm ci` → build → typecheck → test → lint
 
 ## Overview
 
-The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `pull_request` targeting `main` (and on `push` to `main` as a post-merge safety net) and is the first automated gate the repo has. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
+The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `pull_request` targeting `main` (and on `push` to `main` as a post-merge safety net) and is the first automated gate the repo has. The gate is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and the `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
 
 ## Requirements
 
 ### Requirement: PR CI gate stages
-`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces` → `npm run typecheck` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (the dist-discovering runners execute compiled output — see the runner contract below) and MUST precede typecheck (dependent packages resolve `@finalrun/*` types from built `dist/` declarations). The **test and typecheck steps are the gate** — a failing test or a type error fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
+`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces` → `npm run typecheck` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (the dist-discovering runners execute compiled output — see the runner contract below) and MUST precede typecheck (dependent packages resolve `@finalrun/*` types from built `dist/` declarations). The **test and typecheck steps are the gate** — a failing test or a type error fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow carries **no `concurrency` block** — a group left on the default `queue: single` would let GitHub cancel a *pending* same-group run whenever a newer one queues (`cancel-in-progress` governs only the in-progress run), so the block's absence is what keeps a completed verdict per push, with every run starting immediately (see the enforcement requirement below).
 
 **Coverage boundary — every workspace typechecks, and no workspace-wide step is `--if-present`.** Every TypeScript package (`common`, `cloud-core`, `device-node`, `goal-executor`, `report-web`, `cli`) carries a `typecheck` script running `tsc --noEmit -p tsconfig.json`, fanned out by the root `typecheck` script as `npm run typecheck --workspaces`. Without `--if-present`, a missing script fails with npm's `Missing script` error and a deleted tsconfig fails with TS5058. The per-package `tsconfig.json` includes test files, so the stage covers source and tests alike: for `report-web` it is the only thing that typechecks either (its `tsup` + `vite` build never runs `tsc`, and `tsconfig.app/lib.json` exclude tests), and for the five `tsc`-building packages it is deliberately redundant with their `tsc` build over `include: ["src/**/*"]`. No workspace-wide invocation carries `--if-present` — not the root `build`, not `test:workspaces`, not the CI build step — so a workspace that *loses* a `build`/`test`/`typecheck` script is reported rather than skipped. `packages/local-runtime` — a tarball-packaging workspace with no `src/` — is the one intentional no-op, and declares it: its `build`/`test`/`typecheck` scripts print why there is nothing to do and exit 0.
 
@@ -31,6 +31,67 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 - **GIVEN** a PR whose code violates only the `warn`-severity code-quality rules
 - **WHEN** the CI workflow runs
 - **THEN** `npm run lint` exits 0 and the run passes; only a failing test fails the run
+
+### Requirement: A completed verdict per push, and the verdict is required to merge
+Every push to an open PR against `main` MUST produce its own **completed** `test` run — with two
+documented exceptions, both **fail-closed**, so neither can pass an unverified commit: a
+`[skip ci]` / `[no ci]` token in the head commit's message suppresses the run for `push` and
+`pull_request` events, and a PR with merge conflicts gets no `pull_request` run at all (see below —
+GitHub cannot build the test-merge commit). In either case there is no `test` check, and the
+required check then blocks the merge. Two mechanisms carry the guarantee, and each is half of it:
+
+- **Scheduling**: `ci.yml` carries **no `concurrency` key at all**, so no run is ever cancelled
+  or evicted by a newer push — every push's run starts immediately and proceeds to its own
+  terminal conclusion. `cancel-in-progress: false` alone cannot deliver this: it governs only
+  the **in-progress** run, and GitHub *separately* cancels an existing **pending** run whenever
+  a newer one queues into a group on the **default `queue: single`** — so a group left on that
+  default loses the middle run of three rapid pushes. `concurrency.queue: max` (up to 100
+  pending runs, FIFO; a validation error combined with `cancel-in-progress: true`) would keep
+  the pending runs, but it serialises per-push feedback to N × ~1m30s, caps the guarantee at
+  100 pending runs, and protects nothing here — `actions/setup-node`'s cache save fails soft on
+  a concurrent write — so removing the block is the trade that keeps feedback fast and the
+  guarantee unconditional. "Every push" itself comes from the `synchronize` activity type,
+  which is a **default** `pull_request` activity type (alongside `opened` and `reopened`) — the
+  workflow does not opt into it, so the `on:` block stays trigger-minimal. (`release.yml` keeps
+  its own `group` + `cancel-in-progress: false` pair deliberately: it is manually dispatched,
+  must not run concurrently with itself, and rapid triggers are not a real scenario — the shape
+  a queued group suits.)
+- **Enforcement**: the `test` check is a **required status check** on `main` via repo ruleset
+  `14531661`, pinned to the GitHub Actions app (`integration_id: 15368`) so a same-named check
+  from another integration cannot satisfy it. The policy is **non-strict**: a branch need not be
+  up to date with `main` to merge. No `on:` configuration can make GitHub refuse a merge — only
+  a repo-level protection rule can (here, ruleset `14531661`; classic branch protection can also
+  require status checks, but `main` carries none) — which is why the setting, not the workflow,
+  is the load-bearing half.
+
+The job name `test` in `.github/workflows/ci.yml` is therefore a **contract**: renaming the job
+detaches the required check. The failure is fail-closed — the check never reports, so PRs block
+rather than merge unverified — but the symptom (a forever-"Expected" check) does not point at
+the cause; a comment on the job records the ruleset reference, and a rename MUST update the
+ruleset's `required_status_checks` context in the same change.
+
+**Recovery when a run is genuinely absent.** A PR with merge conflicts gets no `pull_request`
+run at all — GitHub cannot build the test-merge commit. That is a *feedback* gap, not a
+*merge-safety* one: a conflicting PR cannot merge regardless, and resolving the conflict fires
+`synchronize`. The merge-safety hole is a cancelled or absent check at a mergeable PR tip, and
+that is exactly what the required check closes. There is no re-run button for a run that never
+started, and `workflow_dispatch` is not the recovery: `ci.yml` deliberately carries no such
+trigger, and a dispatched run on the head branch — which, since the required check is matched by
+`(context, app id)` on the PR's **head** commit, *would* satisfy it — verifies the branch tip in
+isolation rather than the merge result a `pull_request` run checks out, so it satisfies the
+required check on a **weaker** signal. (For a fork PR the dispatch would additionally run in the
+fork, not the base repo.) The working recoveries are to push (an empty commit suffices) or to
+close and reopen the PR (`reopened` is a default activity type).
+
+#### Scenario: three rapid pushes all get verdicts
+- **GIVEN** an in-flight CI run on a PR head, and two more pushes to the same PR in rapid succession — the discriminating case, since with a concurrency group on the default `queue: single` the third push would evict the pending second
+- **WHEN** all three `synchronize` events have fired
+- **THEN** all three runs reach a terminal conclusion and none is `cancelled` — nothing aborts the in-flight run, and no concurrency group exists to queue or evict the pending ones; every push ends with its own verdict
+
+#### Scenario: a PR whose tip has no completed `test` check cannot merge
+- **GIVEN** a PR whose `test` check at the tip is absent or unfinished
+- **WHEN** a merge is attempted
+- **THEN** ruleset `14531661` blocks it until a `test` check from the GitHub Actions app reports success
 
 ### Requirement: Committed lockfile — reproducible `npm ci` installs
 `package-lock.json` is committed at the repo root (one lockfile covers every workspace; `lockfileVersion` 3, installable by the npm 10 bundled with the pinned Node 20.19). Both `.github/workflows/ci.yml` and `release.yml` MUST install with `npm ci` (never `npm install`, which re-resolves caret ranges afresh and makes red/green depend on registry state), and their setup-node steps MUST enable `cache: 'npm'` (keyed on the lockfile). Dependency changes MUST land the updated lockfile in the same commit — `npm ci` fails loudly when `package.json` and the lockfile disagree.
@@ -166,3 +227,54 @@ This costs nothing at the tooling layer and requires no runner change: every run
 **Why**: Explicit `-p` fails loudly (TS5058) when a tsconfig is missing and the fan-out fails loudly when a script is missing, so the stage cannot be silently hollowed out; per-package scripts stay runnable locally in one package. The per-package `tsconfig.json` includes test files, so the stage covers them too — newly for `report-web`, whose tsup/vite build never ran `tsc`, and redundantly for the five `tsc`-building packages, which already typechecked their tests as a build side effect. The redundancy is the point: it makes the coverage explicit rather than a by-product that a future build-tool switch could silently remove. All six packages are covered — not just `report-web`, whose build was the only one that never typechecked — because the other five's coverage was an accident of building with `tsc`.
 **Rejected**: (a) typechecking only `report-web` — leaves the other five one bundler migration away from losing type coverage unnoticed; (b) a root-level chain of six `tsc -p packages/…` invocations — a seventh package added later would be silently absent from the chain; (c) `--workspaces --if-present` — reintroduces the silent-skip gap.
 *Introduced by*: 260728-uloy-harden-gate-clear-safe-backlog
+
+### Every push keeps its verdict; the ruleset makes the verdict required
+**Decision**: `.github/workflows/ci.yml` carries **no `concurrency` block at all**, and the
+`test` check is a required status check on `main` via ruleset `14531661` — pinned to the GitHub
+Actions app (`integration_id: 15368`), non-strict. The ruleset rule was applied out-of-band with
+explicit user approval (backed up first, verified after), because a repo setting cannot ship in
+a PR; the workflow comments and this file are what make it legible in the repo.
+**Why**: A cancelled run is an aborted verdict that never gets replaced — at least 11 commits in
+this repo's history carry exactly one CI run, cancelled, and were never re-verified. Worse, the
+failure mode is silent in the safe-looking direction: an absent check reads exactly like a clean
+one, so a cancelled or missing check at a PR tip was mergeable and invisible. Removing the whole
+block — rather than only disabling `cancel-in-progress` — is what closes the coverage gap, since
+pending runs are evicted independently of that key (mechanism above), and it beats `queue: max`
+on feedback speed with no pending cap. Only the required check closes the merge — no `on:`
+configuration can make GitHub refuse one; that takes a repo-level protection rule. App-pinning
+makes the gate's identity explicit rather than satisfiable by any integration reporting a `test`
+context. The cost of never cancelling is a few extra minutes per active PR (a full run is
+~1m30s) against a guarantee that no push lacks a verdict.
+**Rejected**: (a) `cancel-in-progress: false` with the `concurrency` group kept — pending runs
+stay cancellable (above), and the npm-cache argument for keeping the group does not hold:
+`actions/setup-node`'s cache save fails soft on a concurrent write; (b) `group` +
+`cancel-in-progress: false` + `queue: max` — valid, and it would also keep every pending run (the
+`queue` semantics are above), rejected as a trade-off, not an impossibility: it serialises per-push
+feedback to N × ~1m30s, caps the guarantee at 100 pending runs, and nothing in this workflow needs
+serialising — it is the right shape for a workflow that must not run concurrently with itself,
+which is `release.yml`, not this gate;
+(c) per-commit verification within a push — a matrix over the push's commits costs N× the
+minutes to catch a broken intermediate the tip already fixes; the user chose a verdict per push;
+(d) `strict_required_status_checks_policy: true` — guarantees CI ran against the real merge
+result but forces a rebase/merge on every PR; (e) `workflow_dispatch` as an absent-run recovery
+— a dispatched run on the head branch would actually satisfy the `(context, app id)` match on
+the PR's head commit, but it verifies the branch tip in isolation rather than the merge result a
+`pull_request` run checks out — a weaker signal — and `ci.yml` deliberately carries no such
+trigger; (f) requiring CodeRabbit — it reports a legacy status context, and an automated
+reviewer's opinion should not gate a merge.
+*Introduced by*: 260728-xn7o-ci-verdict-every-push-required-check
+
+### Platform-behaviour claims are verified against GitHub's primary sources
+**Decision**: Statements in this file about how GitHub Actions or repo rulesets behave —
+concurrency queueing, default `pull_request` activity types, `[skip ci]` scope, how a required
+check is matched — are checked against GitHub's reference documentation or the live API before
+they are recorded, and the verified semantics of a feature this workflow deliberately does *not*
+use (notably `concurrency.queue`) stay in the rejected-alternative record rather than being pruned.
+**Why**: These are claims about the platform, not about this repo, so nothing in the tree can
+confirm or refute one. The dangerous form is the negative — "there is no such key", "that cannot
+satisfy the required check" — because a writer's knowledge of a vendor has a cutoff date and an
+absence can only be checked, never inferred. Asserted confidently, a false negative reads as
+authoritative once it is in memory and then justifies the wrong configuration.
+**Rejected**: recording only the chosen configuration and its grounds — a later writer re-derives
+the rejected options from recollection and can prune a guard on a premise the repo cannot settle.
+*Introduced by*: 260728-xn7o-ci-verdict-every-push-required-check

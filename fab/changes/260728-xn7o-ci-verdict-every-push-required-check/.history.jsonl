@@ -1,0 +1,20 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-28T08:40:33Z"}
+{"args":"Make the CI gate produce a verdict for every push to a PR against main, and make that verdict a required check","cmd":"fab-new","event":"command","ts":"2026-07-28T08:40:33Z"}
+{"delta":"+4.9","event":"confidence","score":4.9,"trigger":"calc-score","ts":"2026-07-28T08:42:06Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-28T09:05:21Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-28T09:05:21Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-28T09:06:14Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-28T09:15:20Z"}
+{"event":"review","result":"failed","ts":"2026-07-28T09:33:36Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-28T09:33:36Z"}
+{"delta":"-0.1","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-28T09:35:47Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-28T09:36:48Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-28T09:46:36Z"}
+{"event":"review","result":"failed","ts":"2026-07-28T09:59:53Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-28T09:59:53Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-28T10:02:31Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-28T10:13:06Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-28T10:27:29Z"}
+{"event":"review","result":"passed","ts":"2026-07-28T10:27:29Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-28T10:28:30Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-28T10:35:47Z"}
