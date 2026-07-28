@@ -1,5 +1,5 @@
 ---
-description: "Next.js report viewer for test run results"
+description: "Vite React report viewer SPA + importable UI library for test run results"
 ---
 # report-web
 
@@ -7,4 +7,4 @@ description: "Next.js report viewer for test run results"
 
 | File | Description |
 |------|-------------|
-| [renderers](renderers.md) | HTML rendering including inline device log viewer |
+| [renderers](renderers.md) | report-web is a Vite React SPA + importable UI library; pure view-model/log/format/route logic under src/ui and src/ is pinned by characterization tests; the device-log viewer is DeviceLogPanel.tsx; manifest loading and the 500-line device-log tail read live in packages/cli/src/reportViewModel.ts |

@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate runs `npm ci` (committed lockfile) → build → test → lint via .github/workflows/ci.yml; code-quality principles are ESLint warnings; tests use explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, extract phases behind a phase-outcome union with per-call state and per-acquisition `finally`, and prove equivalence with a differential harness; temp artifacts named per invocation."
+description: "PR CI gate runs `npm ci` → build → test → lint via .github/workflows/ci.yml and never typechecks — type errors survive report-web's tsup/vite build; code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, extract phases behind a phase-outcome union with per-acquisition `finally`, and prove equivalence with a differential harness."
 ---
 # PR Quality Gate (ci)
 
@@ -13,7 +13,14 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 ## Requirements
 
 ### Requirement: PR CI gate stages
-`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (package `test` scripts run against compiled `dist/` output). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
+`.github/workflows/ci.yml` MUST run, in order, `npm ci` → `npm run build --workspaces --if-present` → `npm run test:workspaces` → `npm run lint`. The build MUST precede tests (the dist-discovering runners execute compiled output — see the runner contract below). The **test step is the gate** — a failing test fails the run. The **lint step is non-blocking**: the code-quality rules are `warn`-severity, so eslint exits 0 on warnings-only output. The workflow declares a `concurrency` group keyed on `github.ref` with `cancel-in-progress: true`.
+
+**Coverage boundary — the gate does not typecheck.** No stage runs `tsc --noEmit`, and no `typecheck` script exists anywhere in the repo, so type safety is a by-product of how each package happens to build rather than something the gate checks. `common`, `cloud-core`, `device-node`, `goal-executor` and `cli` build by running `tsc` over `include: ["src/**/*"]`, which covers their test files too; `report-web` builds with `tsup` + `vite`, neither of which typechecks. Its `packages/report-web/tsconfig.json` (`noEmit: true`, covering `src/**/*.ts` and `src/**/*.tsx`) exists for exactly that check and passes clean, but no npm script and no CI step invokes it — so a type error anywhere under `packages/report-web/src`, source or test file alike, clears all three stages. The second edge is `--if-present` on both the build and `test:workspaces` steps: a workspace with no `test` script is skipped in silence rather than reported. `packages/local-runtime` — a tarball-packaging workspace with no `src/` — is the standing instance, and a package that lost its `test` script would be indistinguishable from it.
+
+#### Scenario: a type error clears every stage of the gate
+- **GIVEN** an excess property added to a typed fixture in `packages/report-web/src/ui/test/viewModel.test.ts`
+- **WHEN** build, test and lint run
+- **THEN** all three exit 0, and only `tsc -p packages/report-web/tsconfig.json` reports it (TS2353)
 
 #### Scenario: PR with only lint warnings stays green
 - **GIVEN** a PR whose code violates only the `warn`-severity code-quality rules
@@ -34,12 +41,10 @@ The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `
 `@typescript-eslint/no-unused-vars`, `max-depth`, and `prefer-const` are clear tree-wide and MUST stay clear — a new violation of any of the three is a regression introduced by the PR, not inherited debt. The remaining warnings are all `max-lines-per-function` and `complexity`, concentrated in the pre-existing oversized functions; those two rules are what still blocks promoting the set from `warn` to `error`.
 
 ### Requirement: Tests run through explicit-discovery runner scripts
-Every workspace `test` script MUST discover test files by explicit recursive walk (never a `node --test`/`tsx --test` glob), because the pinned Node 20.19 does not expand globs and a directory positional (`node --test dist/`) silently resolves to one bogus passing entry on Node ≥21. Two runner shapes exist:
+Every workspace `test` script MUST discover test files by explicit recursive walk (never a `node --test`/`tsx --test` glob), because the pinned Node 20.19 does not expand globs and a directory positional (`node --test dist/`) silently resolves to one bogus passing entry on Node ≥21. Every runner is **strict**: finding **zero** test files MUST exit **1** — a build/discovery fault, never a silent pass. Two runner locations exist:
 
-- **Strict** — `scripts/run-node-tests.mjs`, shared by `packages/common`, `packages/cloud-core`, `packages/device-node`, and `packages/goal-executor` (packages with real tests), invoked as `node ../../scripts/run-node-tests.mjs` (npm sets cwd to the workspace dir; it discovers `dist/**/*.test.js` under `process.cwd()`). Finding **zero** test files exits **1** — for these packages that is a build/packaging fault, never a silent pass. Missing `dist/` exits 1 with a build hint; signal deaths propagate as `128 + signo`.
-- **Tolerant** — `packages/report-web/scripts/runTests.mjs`, for the one package with **zero** test files today. It exits **0** with a "no tests yet" notice when — and only when — no test files exist, and propagates the runner's real exit code once tests are present (no blanket `|| true`). `report-web` discovers `src/**/*.test.ts` and runs them via `node --import tsx --test`.
-
-`packages/cli/scripts/runTests.mjs` is the original strict runner (zero files → exit 1) this pattern is modeled on.
+- **Shared** — `scripts/run-node-tests.mjs`, used by `packages/common`, `packages/cloud-core`, `packages/device-node`, and `packages/goal-executor`, invoked as `node ../../scripts/run-node-tests.mjs` (npm sets cwd to the workspace dir; it discovers compiled `dist/**/*.test.js` under `process.cwd()`). Missing `dist/` exits 1 with a build hint; signal deaths propagate as `128 + signo`.
+- **Package-local** — `packages/cli/scripts/runTests.mjs` (the original strict runner the pattern is modeled on, discovering its own `dist/**/*.test.js`) and `packages/report-web/scripts/runTests.mjs`. The `report-web` runner discovers `src/**/*.test.ts` AND `src/**/*.test.tsx` and runs them via `node --import tsx --test` (`tsx` is already a devDependency): its `tsup` + `vite` build emits no test files to `dist/` — tsup bundles only the two library entries with tests excluded by `tsconfig.lib.json`, and vite bundles the SPA — so dist-based discovery would find nothing. The `.tsx` match exists so future component tests are discovered rather than silently skipped.
 
 ### Requirement: Test files live in a `test/` directory beside the code they cover
 A `*.test.ts` file MUST sit in a `test/` subdirectory of the directory holding its subject, at every level of the tree — `src/apiKey.ts` is covered by `src/test/apiKey.test.ts`, and `src/device/android/AndroidDevice.ts` by `src/device/android/test/AndroidDevice.test.ts`. Tests are never co-located as siblings of their subject.
@@ -51,10 +56,10 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **WHEN** a test is written for it
 - **THEN** it is placed at `src/infra/android/test/Foo.test.ts` and imports its subject as `../Foo.js`, with no runner or config change required
 
-#### Scenario: zero-test package under the pinned Node
-- **GIVEN** `packages/report-web` has no `src/**/*.test.ts`
-- **WHEN** its `test` script runs
-- **THEN** it prints a "no tests yet" notice and exits 0, keeping the gate green
+#### Scenario: test discovery is a hard gate in every package
+- **GIVEN** `packages/report-web` (characterization tests under `src/**/test/` — 260727-e5nk)
+- **WHEN** its `test` script finds zero `src/**/*.test.ts(x)` files
+- **THEN** it exits 1 — a discovery/packaging fault, exactly like every other package
 - **GIVEN** a failing test file exists under `src/`
 - **WHEN** the script runs
 - **THEN** it propagates the runner's real non-zero exit code
@@ -85,11 +90,11 @@ This costs nothing at the tooling layer and requires no runner change: every run
 **Rejected**: (a) `node --test "dist/**/*.test.js"` — fails on 20.19 with "Could not find"; (b) `node --test dist/` — on Node ≥21 the directory positional resolves to a single bogus passing entry, a silently-green suite; (c) bumping CI to Node ≥21 — would stop validating the declared 20.19 floor.
 *Introduced by*: 260724-gl51-ci-gate-lint-enforcement
 
-### Separate strict and tolerant runners
-**Decision**: One shared **strict** runner (`scripts/run-node-tests.mjs`, zero files → exit 1) for packages with real tests; a per-package **tolerant** runner (zero files → exit 0) for a package with no tests yet — today only `report-web`. A package graduates to the shared strict runner (and its tolerant script is deleted) as soon as it gains real tests, making "zero test files" a hard error again.
-**Why**: The gate must be green *and honest* — green for a package that legitimately has no tests yet, red for a package whose real tests failed or failed to compile. A single policy cannot express both; the exit-code inversion is the distinguishing signal. One shared strict copy avoids duplicating the script into its consuming packages.
-**Rejected**: (a) a blanket `|| true` — swallows genuine test failures too; (b) copying the strict runner into each consuming package — repeated duplication of a ~70-line script in a change that exists to enforce DRY.
-*Introduced by*: 260724-gl51-ci-gate-lint-enforcement
+### Every runner is strict; the tolerant zero-test shape is retired
+**Decision**: All six runner consumers are **strict** (zero test files → exit 1): the shared `scripts/run-node-tests.mjs` for the dist-compiled packages, plus the two package-local runners (`packages/cli`, `packages/report-web`). The **tolerant** shape (zero files → exit 0 with a "no tests yet" notice) existed solely for a package with no tests yet and has no consumer left — every workspace carrying a `test` script has real tests, so it is retired, not a live option. A future genuinely test-free package would need a new, deliberately scoped tolerant runner argued in its own change — never a blanket `|| true`.
+**Why**: The gate must be green *and honest* — red when real tests failed, failed to compile, or failed to be discovered. Once a package has tests, "zero test files found" is always a build/discovery fault (a rename breaking the walk, a build no longer emitting tests), and a tolerant runner would let exactly that regression pass the gate silently. Graduation on gaining tests was the retirement condition designed in from the start.
+**Rejected**: (a) a blanket `|| true` — swallows genuine test failures too; (b) keeping the tolerant runner after tests exist — a discovery regression reads as a passing suite; (c) forcing `report-web` onto the shared dist-based runner at graduation — its `tsup`+`vite` build emits no test files to `dist/`, so the shared runner would find nothing; the package-local runner was corrected to strict instead.
+*Introduced by*: 260724-gl51-ci-gate-lint-enforcement (retired as a live shape by 260727-e5nk-backfill-report-web-logic-tests)
 
 ### A refactor's unit of work is one package's tested functions, not one or two of them
 **Decision**: A change that clears `max-lines-per-function`/`complexity` warnings takes **every flagged function in one package that already has tests** as its scope. `packages/goal-executor` is the worked example: `ActionExecutor.ts` and `ai/AIAgent.ts` are restructured together, 14 functions against the 47 tests already covering them. Existing coverage is the precondition, not an aspiration — a flagged function in the same package with no tests is held out of the batch and deferred to its own characterization change (below), because the batch's entire safety argument is a suite it did not write. The package is also the outer bound: one batch, one shared-scaffolding argument, one reviewer's working set.
