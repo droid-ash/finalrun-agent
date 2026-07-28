@@ -10,7 +10,7 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 11
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-28T04:24:38Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:37:50Z"}
     hydrate: {started_at: "2026-07-28T04:37:50Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:44:31Z"}
     ship: {started_at: "2026-07-28T04:44:31Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-28T04:47:34Z"}
-    review-pr: {started_at: "2026-07-28T04:47:34Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-28T04:47:34Z", driver: git-pr, iterations: 1, completed_at: "2026-07-28T04:59:02Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/163
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: CI gate gains a typecheck stage (tsc --noEmit per package) and drops --if-present from every workspace fan-out (local-runtime declares explicit no-ops); four provably-dead constructs removed and five mutation-verified assertions added
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-28T04:56:21Z
+last_updated: 2026-07-28T04:59:02Z
