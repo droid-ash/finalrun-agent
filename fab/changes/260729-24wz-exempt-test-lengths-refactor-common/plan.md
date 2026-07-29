@@ -168,7 +168,7 @@ behaviour, not the original's, proving nothing about equivalence.
 ### Phase 2: Characterize `Hierarchy.ts` (unmodified source)
 
 - [x] T003 Write `packages/common/src/models/test/Hierarchy.test.ts` pinning every behaviour
-  listed in R2 against the unmodified source; build and confirm all pass (43/43 green on
+  listed in R2 against the unmodified source; build and confirm all pass (44/44 green on
   unmodified source) <!-- R2 -->
 - [x] T004 Mutation-verify each characterization family: corrupt one behaviour in
   `Hierarchy.ts` (chain order swap, `??`→`||`, drop `:id/` post-processing, drop an `isImage`
@@ -212,7 +212,7 @@ behaviour, not the original's, proving nothing about equivalence.
   the `isImage` disjunction as their own logic (disjunction moved verbatim into
   `_isImageNode`), and clear the constructor's complexity with an equivalent
   nullish-defaulting helper (`orDefault`) — casts untouched <!-- R3 -->
-- [x] T006 Verify: characterization tests pass **unmodified** (43/43, zero edits to the test
+- [x] T006 Verify: characterization tests pass **unmodified** (44/44, zero edits to the test
   file since creation), `Hierarchy.ts` produces zero eslint findings, typecheck green
   <!-- R3 -->
 
@@ -260,8 +260,8 @@ behaviour, not the original's, proving nothing about equivalence.
   `max-depth` and `no-unused-vars` at 0 <!-- R5 -->
 
   Gate results: `npm ci` exit 0 · `npm run build --workspaces` exit 0 · `npm run typecheck`
-  exit 0 · `npm run test:workspaces` exit 0 with **516 tests / 516 pass / 0 fail**
-  (469 baseline + 43 Hierarchy characterization + 4 CliEnv.load unit tests) · `npm run lint`
+  exit 0 · `npm run test:workspaces` exit 0 with **517 tests / 517 pass / 0 fail**
+  (469 baseline + 44 Hierarchy characterization + 4 CliEnv.load unit tests) · `npm run lint`
   exit 0 with **42 warnings / 0 errors**.
 
 ## Execution Order
@@ -287,7 +287,7 @@ behaviour, not the original's, proving nothing about equivalence.
   behaviour family in R2 (alias precedence per chain, `??`-not-truthiness per chain, `id`
   post-processing, `isImage` paths, `_parseBounds` forms, `_parseNode` tree indexing, all
   three entry points, constructor defaults)
-  *(review: 43 tests, all eight families present)*
+  *(review: 44 tests, all eight families present)*
 - [x] A-003 R3: `Hierarchy.ts` has zero lint warnings; the `_pick` helper preserves `??`
   semantics; `id` and `isImage` keep their own logic
   *(review: `_pick`'s presence test is the explicit `value !== null && value !== undefined`,
@@ -308,14 +308,14 @@ behaviour, not the original's, proving nothing about equivalence.
 - [x] A-006 R3: The characterization tests pass unmodified before AND after the Hierarchy
   refactor; the lying-cast defect is unfixed, consolidated into `_pick`'s single `as T`
   *(review: decisive — `origin/main`'s pre-refactor `Hierarchy.ts` checked into place with the
-  test file sha-verified unchanged ran **43/43, exit 0**. The casts are NOT fixed: the lying
+  test file sha-verified unchanged ran **44/44, exit 0**. The casts are NOT fixed: the lying
   read is now the single unvalidated `value as T` in `_pick` (:392), documented as deferred.
   See nice-to-have NTH-2 — "byte-for-byte untouched" is imprecise wording; the cast
   behaviour is preserved, but the casts were relocated into `_pick` rather than left in
   place. R3's normative phrasing, "the lying `as T` cast behaviour preserved", is met.)*
 - [x] A-007 R4: The pre-existing `packages/common/src/test/` tests pass unmodified after the
   three extraction refactors
-  *(review: full `common` suite 122/122)*
+  *(review: full `common` suite 123/123)*
 
 ### Scenario Coverage
 
@@ -396,7 +396,7 @@ behaviour, not the original's, proving nothing about equivalence.
   test tripped the (deliberately retained) test `complexity` rule via 13 `node?.` optional
   chains; it was restyled to `assert.ok(node)` + plain property access AFTER the
   before/after equivalence proof completed. Assertions are semantically identical (arguably
-  stronger — non-null is now asserted explicitly); all 43 re-verified green against the
+  stronger — non-null is now asserted explicitly); all 44 re-verified green against the
   refactored source. No pinned behaviour was weakened and no assertion value changed.
 
 ## Deletion Candidates
@@ -415,7 +415,7 @@ behaviour, not the original's, proving nothing about equivalence.
 
 | # | Grade | Decision | Rationale | Scores |
 |---|-------|----------|-----------|--------|
-| 1 | Certain | The constructor's complexity-14 warning is cleared with a small nullish-defaulting helper (`value ?? fallback` moved into a function), not by forcing typed params through the `Record`-shaped `_pick` | The intake prescribes `_pick` for the alias chains only; the constructor is defaulting over a typed params object, and `?? `-in-a-function is byte-equivalent semantics with zero behaviour change | S:75 R:90 A:90 D:85 |
+| 1 | Certain | The constructor's complexity-14 warning is cleared with a small nullish-defaulting helper (`value ?? fallback` moved into a function), not by forcing typed params through the `Record`-shaped `_pick` | The intake prescribes `_pick` for the alias chains only; the constructor is defaulting over a typed params object, and `??`-in-a-function is byte-equivalent semantics with zero behaviour change | S:75 R:90 A:90 D:85 |
 | 2 | Certain | `_parseNode`'s field reads go through `_pick` too (single-key and two-key chains) | Intake assumption 5 already covers collapsing `_parseNode`'s chains; its reads are structurally identical to `_parseFlatNode`'s, and mutation-verified characterization tests pin both paths | S:80 R:90 A:90 D:85 |
 | 3 | Confident | `isImage`'s disjunction is extracted verbatim into its own private helper rather than left inline | `_parseFlatNode` must land ≤ complexity 12; the id post-processing plus the 9-point isImage expression alone exceed it. Moving the expression unchanged preserves both the "keep own logic" instruction and equivalence | S:65 R:85 A:80 D:75 |
 | 4 | Confident | `CliEnv.load`'s equivalence proof is the `runCheck` integration tests plus targeted unit tests added only where mutation exposes a gap the refactor touches | `env.test.ts` turned out not to cover `load` at all (contradicting the intake's coverage table); the intake's own rule — mutation-verify before relying — resolves this: rely on what mutation proves, add tests only for what it disproves | S:70 R:85 A:80 D:75 |
