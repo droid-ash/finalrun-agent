@@ -15,12 +15,29 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs: a new push to the same ref aborts the in-flight run.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+# There is deliberately NO `concurrency:` block here: every push to a PR keeps
+# its own completed verdict. A cancelled run at a PR tip is an unverified
+# commit that reads as clean — "no failing checks" looks exactly like
+# "checks passed". Two instincts to resist:
+#   - Do not re-add `cancel-in-progress: true` to save CI minutes. That trades
+#     a few minutes per active PR for unverified commits.
+#   - Do not re-add a bare `concurrency.group` either. On the default
+#     `queue: single`, GitHub cancels an existing PENDING run whenever a newer
+#     run queues into the same group (`cancel-in-progress` governs only the
+#     in-progress run), so a group left on that default silently restores
+#     cancellation under rapid pushes. `queue: max` avoids that (it keeps up
+#     to 100 pending runs, FIFO) but serialises: per-push feedback becomes
+#     N × ~1m30s instead of ~1m30s, and nothing here needs serialising —
+#     `actions/setup-node`'s cache save fails soft on a concurrent write.
 
 jobs:
+  # The job name `test` is a contract: the repo's `main` ruleset (id 14531661)
+  # requires a status check with context `test`, pinned to the GitHub Actions
+  # app (integration_id: 15368). Renaming this job detaches the required check.
+  # That failure is fail-closed — PRs block on a check that never reports,
+  # rather than merging unverified — but the symptom (a forever-"Expected"
+  # check) does not point here. If this job must be renamed, update the
+  # ruleset's required_status_checks context in the same breath.
   test:
     runs-on: ubuntu-latest
     steps:

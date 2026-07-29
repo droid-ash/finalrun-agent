@@ -1,5 +1,5 @@
 ---
-description: "PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out), the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
+description: "PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out) and its enforcement — a completed verdict per push (no `concurrency` block) with the `test` check required to merge via ruleset 14531661 — plus the committed-lockfile reproducible-install contract shared with release.yml and the explicit-discovery test-runner contract for the Node-20.19 floor"
 ---
 # Ci Documentation
 
@@ -7,4 +7,4 @@ description: "PR quality gate (`npm ci` → build → typecheck → test → lin
 
 | File | Description |
 |------|-------------|
-| [pr-quality-gate](pr-quality-gate.md) | PR CI gate runs `npm ci` → build → typecheck → test → lint via .github/workflows/ci.yml — every TypeScript workspace typechecks via `tsc --noEmit`, no fan-out uses `--if-present` (a lost script fails loudly; local-runtime holds explicit no-ops); code-quality rules are ESLint warnings; tests use strict explicit-discovery runners (Node 20.19 has no `node --test` glob); refactors batch a package's tested oversized functions, characterize untested ones first, and prove equivalence differentially. |
+| [pr-quality-gate](pr-quality-gate.md) | PR CI gate (`npm ci` → build → typecheck → test → lint, .github/workflows/ci.yml), enforced: every push to an open PR gets a completed verdict (no cancellation) and `test` is required to merge (ruleset 14531661, app-pinned); every TypeScript workspace typechecks, no `--if-present` fan-outs (local-runtime holds no-ops); code-quality rules are ESLint warnings; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first, proving equivalence differentially. |
