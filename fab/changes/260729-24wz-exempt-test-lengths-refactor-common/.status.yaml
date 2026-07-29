@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 11
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-29T17:48:06Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:13:24Z"}
     review: {started_at: "2026-07-29T18:13:24Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:27:57Z"}
     hydrate: {started_at: "2026-07-29T18:27:57Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:44:56Z"}
-    ship: {started_at: "2026-07-29T18:44:56Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-29T18:44:56Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:47:58Z"}
+    review-pr: {started_at: "2026-07-29T18:47:58Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/166
 change_type_source: explicit
 true_impact:
-    added: 0
-    deleted: 0
-    net: 0
+    added: 1546
+    deleted: 127
+    net: 1419
     tests:
-        added: 0
-        deleted: 0
-        net: 0
-    computed_at: "2026-07-29T18:44:56Z"
-    computed_at_stage: hydrate
+        added: 446
+        deleted: 1
+        net: 445
+    computed_at: "2026-07-29T18:47:58Z"
+    computed_at_stage: ship
 summary: exempts test files from max-lines-per-function only (complexity/max-depth stay on) and clears packages/common's source warnings behind a characterization suite for Hierarchy's parse contract
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-29T18:44:56Z
+last_updated: 2026-07-29T18:47:58Z
