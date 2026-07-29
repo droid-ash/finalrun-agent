@@ -1,0 +1,51 @@
+id: 24wz
+name: 260729-24wz-exempt-test-lengths-refactor-common
+created: 2026-07-29T17:44:02Z
+created_by: ashish-noon
+change_type: refactor
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 11
+    acceptance_count: 15
+    acceptance_completed: 15
+confidence:
+    certain: 5
+    confident: 3
+    tentative: 0
+    unresolved: 0
+    score: 4.9
+    fuzzy: true
+    dimensions:
+        signal: 76.9
+        reversibility: 85.0
+        competence: 84.4
+        disambiguation: 81.3
+stage_metrics:
+    intake: {started_at: "2026-07-29T17:44:02Z", driver: fab-new, iterations: 1, completed_at: "2026-07-29T17:48:06Z"}
+    apply: {started_at: "2026-07-29T17:48:06Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:13:24Z"}
+    review: {started_at: "2026-07-29T18:13:24Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:27:57Z"}
+    hydrate: {started_at: "2026-07-29T18:27:57Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-29T18:44:56Z"}
+    ship: {started_at: "2026-07-29T18:44:56Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-29T18:44:56Z"
+    computed_at_stage: hydrate
+summary: exempts test files from max-lines-per-function only (complexity/max-depth stay on) and clears packages/common's source warnings behind a characterization suite for Hierarchy's parse contract
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-29T18:44:56Z

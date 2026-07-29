@@ -1,5 +1,7 @@
 # Archive Index
 
+- **260728-xn7o-ci-verdict-every-push-required-check** — A CI Verdict For Every Push, Enforced
+- **260728-o3me-fix-deferred-error-path-defects** — Fix Deferred Error-Path Defects
 - **260728-uloy-harden-gate-clear-safe-backlog** — Harden the CI Gate and Clear the Zero-Risk Backlog
 - **260727-e5nk-backfill-report-web-logic-tests** — Close the Last Zero-Coverage Package — `report-web` Logic Tests
 - **260727-18tg-characterize-refactor-cli-giants** — Characterize and Refactor the Two Untested `cli` Giants

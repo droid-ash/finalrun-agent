@@ -1,0 +1,10 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-29T17:44:02Z"}
+{"args":"Exempt test files from max-lines-per-function, then clear packages/common's 7 source warnings — characterizing Hierarchy.ts first since it has zero parse coverage","cmd":"fab-new","event":"command","ts":"2026-07-29T17:44:02Z"}
+{"delta":"+4.9","event":"confidence","score":4.9,"trigger":"calc-score","ts":"2026-07-29T17:45:43Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-29T17:48:06Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-29T17:48:06Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-29T17:49:09Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-29T18:13:24Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-29T18:27:57Z"}
+{"event":"review","result":"passed","ts":"2026-07-29T18:27:57Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-29T18:44:56Z"}

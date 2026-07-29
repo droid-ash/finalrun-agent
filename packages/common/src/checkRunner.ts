@@ -22,6 +22,7 @@ import {
   validateAppOverride,
   type AppOverrideValidationResult,
   type FinalRunWorkspace,
+  type ResolvedEnvironmentFile,
 } from './workspace.js';
 import type { LoadedEnvironmentConfig } from './testLoader.js';
 
@@ -58,13 +59,7 @@ export async function runCheck(
     options.envName,
   );
 
-  const runtimeEnv = new CliEnv();
-  if (resolvedEnvironment.usesEmptyBindings) {
-    runtimeEnv.load(undefined, { includeDotEnv: false, cwd: workspace.rootDir });
-  } else {
-    runtimeEnv.load(resolvedEnvironment.envName, { cwd: workspace.rootDir });
-  }
-
+  const runtimeEnv = loadRuntimeEnv(workspace, resolvedEnvironment);
   const environment = await loadEnvironmentConfig(
     resolvedEnvironment.envPath,
     resolvedEnvironment.envName,
@@ -91,15 +86,7 @@ export async function runCheck(
     }),
   );
 
-  const validatedAppOverride = options.appPath
-    ? await validateAppOverride(options.appPath, options.platform)
-    : undefined;
-  const appOverride = validatedAppOverride
-    ? {
-        ...validatedAppOverride,
-        resolvedIdentifier: await resolveAppOverrideIdentifier(validatedAppOverride),
-      }
-    : undefined;
+  const appOverride = await resolveRequestedAppOverride(options);
   const resolvedApp = resolveAppConfig({
     workspaceApp: workspaceConfig.app,
     environmentApp: environment.config.app,
@@ -116,6 +103,41 @@ export async function runCheck(
     suite: resolvedRunTarget.suite,
     resolvedApp,
     appOverride,
+  };
+}
+
+/**
+ * Load runtime env bindings for the resolved environment: dotenv files are
+ * read from the workspace root, and an env-free run (empty bindings) skips
+ * dotenv files entirely.
+ */
+function loadRuntimeEnv(
+  workspace: FinalRunWorkspace,
+  resolvedEnvironment: ResolvedEnvironmentFile,
+): CliEnv {
+  const runtimeEnv = new CliEnv();
+  if (resolvedEnvironment.usesEmptyBindings) {
+    runtimeEnv.load(undefined, { includeDotEnv: false, cwd: workspace.rootDir });
+  } else {
+    runtimeEnv.load(resolvedEnvironment.envName, { cwd: workspace.rootDir });
+  }
+  return runtimeEnv;
+}
+
+/**
+ * Validate an --app override (when given) and enrich it with the identifier
+ * resolved from the app artifact itself.
+ */
+async function resolveRequestedAppOverride(
+  options: CheckRunnerOptions,
+): Promise<AppOverrideValidationResult | undefined> {
+  if (!options.appPath) {
+    return undefined;
+  }
+  const validatedAppOverride = await validateAppOverride(options.appPath, options.platform);
+  return {
+    ...validatedAppOverride,
+    resolvedIdentifier: await resolveAppOverrideIdentifier(validatedAppOverride),
   };
 }
 
