@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "Per-test device log capture (manager, providers, Device integration) and the write-stream finalization contract: every exit from start/stop ends and flushes the log file's write stream through one shared `LogWriteStreamRegistry`, held per provider instance and keyed on the capture's output file path, so the file the CLI copies next is complete."
+description: "Per-test device log capture (manager, providers, Device integration) and the write-stream finalization contract: every exit from start/stop ends and flushes the log file's write stream through one shared `LogWriteStreamRegistry`, held per provider instance and keyed on the capture's output file path, so the file the CLI copies next is complete. `open()` attaches a persistent `error` listener that records the first error and never throws, and `finalize` fails the stop on it."
 ---
 # Log Capture (device-node)
 
@@ -46,6 +46,9 @@ The log capture system mirrors RecordingManager/RecordingProvider exactly:
 - Start failures return `DeviceNodeResponse { success: false }` and clean up map entries.
 - Stop failures still finalize state (delete from maps, add to stopped set) to prevent leaks.
 - File deletion on `keepOutput: false` uses `force: true` and logs warnings on failure.
+- A write stream's own `error` is handled by the listener `open()` attaches, recorded on the registry
+  entry, and surfaced by `finalize` — never left to Node's unhandled-`error` throw (see the listener
+  requirement below).
 
 ## Requirements
 
@@ -62,7 +65,9 @@ Two entry points express the difference in how a failure is reported:
 
 - **`finalize(outputFilePath, source?)`** throws. It is the success path's call
   (`AndroidLogcatProvider.stopLogCapture`, `IOSLogProvider.stopLogCapture`): a log that could not be
-  flushed is a failed stop, because the file is not known to be complete.
+  flushed is a failed stop, because the file is not known to be complete. That holds for an error the
+  stream emitted long before the stop as much as for one raised by the flush here (see the listener
+  requirement below).
 - **`finalizeQuietly(outputFilePath, source?)`** logs and swallows. It is the call on every path
   that is already returning a failure — a start that threw, a stop whose SIGINT was never delivered
   (an early return), and each provider's outer `catch` when `_waitForExit` throws. Those paths still
@@ -70,10 +75,11 @@ Two entry points express the difference in how a failure is reported:
   failure being reported.
 
 `finalize` is idempotent and cheap on repeat: an untracked path (a capture that never opened a
-stream, or one an earlier stop already finalized) and an already-finished or already-destroyed
-stream return at once, which is what lets an error path call it without knowing whether the success
-path already did. Untracking and ending run in a `finally`, so a rejecting drain cannot strand a
-stream that nothing else holds a handle on.
+stream, or one an earlier stop already finalized) returns at once, and an already-finished or
+already-destroyed stream skips the flush, which is what lets an error path call it without knowing
+whether the success path already did. Untracking and ending run in a `finally`, so a rejecting drain
+cannot strand a stream that nothing else holds a handle on. A stream destroyed *by an error* is the
+one case that skips the flush and still fails: it rejects with the recorded error (below).
 
 #### Scenario: buffered output is still complete on disk after the stop
 
@@ -110,6 +116,71 @@ worse than a truncated diagnostic artifact.
 - **GIVEN** a stopped capture whose `stdout` has not reached EOF after 5 s
 - **WHEN** the drain wait times out
 - **THEN** the source is detached, a warning names the output file as possibly incomplete, the stream is ended and flushed, and the stop resolves
+
+### Requirement: The write stream's `error` listener is attached at `open()`, records the first error, and never throws
+
+`LogWriteStreamRegistry.open()` MUST attach the stream's `error` listener **before it returns** —
+before anything can pipe into the stream — and the listener MUST stay attached for the stream's whole
+life. `fs.createWriteStream` opens its fd asynchronously, so an `EACCES`, a missing `finalrun-logs`
+directory or an `EMFILE` arrives as an `error` event well after `open()` has returned, and every
+later write can fail the same way (`ENOSPC`). `Readable.pipe()` does **not** forward a destination's
+errors to the source, so an `error` event with no listener is one Node throws: an
+`uncaughtException` that takes the CLI down mid-run. The registry therefore tracks a per-path entry
+(`{ readonly stream; error? }`) rather than the bare stream — module-private, like the registry
+itself.
+
+**The first error is recorded, not merely logged, and a later one MUST NOT overwrite it** — a second
+event is fallout on an already-destroyed stream, while the first is what explains the failure.
+Recording is what makes the failure outlive the event: `_endAndFlush` early-returns on a
+`writableFinished`/`destroyed` stream and an errored stream auto-destroys, so without the record
+`finalize` would skip the flush, find nothing to report, and resolve — **a successful stop over a log
+file that was never written**. `finalize` MUST fail the stop on a recorded error, and MUST do so
+**after** its existing `try`/`finally`: a drain rejection or a flush error is already the failure
+being reported and keeps precedence, so nothing is masked by a redundant one.
+
+**The listener MUST NOT throw.** It is the listener of last resort, so its `Logger.e` call is guarded,
+and `finalizeQuietly`'s own `Logger.e` is guarded for the same reason: `finalize`'s re-throw of a
+recorded error is what makes that `catch` reachable on the very failure the guard exists for, and
+`finalizeQuietly` MUST resolve for callers that are already returning a failure. The reason is
+`Logger.e`'s **independent** fallibility: `Logger._emit`'s sink
+loop (`packages/common/src/logger.ts:103-105`) runs every sink with no `try`/`catch`, and the CLI
+installs `ReportWriter.createLoggerSink()` (`packages/cli/src/reportWriter.ts:132`), a bare
+synchronous `fs.appendFileSync`, so a full disk, a permissions change or a removed artifacts
+directory makes the log call throw on its own schedule. The two failures can also be one, but only
+conditionally: the device log lives at `<os.tmpdir()>/finalrun-logs/…` and the runner log at
+`<runDir>/runner.log` — **different directories**, so the `ENOSPC`-hits-both correlation holds only
+where tmpdir and the artifacts directory share a filesystem. The guard does not rest on that
+correlation. A throw from the listener escapes `emit('error')`, which Node calls on a tick with no
+enclosing `try`, and becomes exactly the `uncaughtException` the listener exists to prevent; a lost
+log line is the cheaper outcome, and the record is taken first so nothing the stop depends on is at
+stake.
+
+#### Scenario: a stream is handed out before it can fail
+
+- **GIVEN** a stream just returned from `open()`
+- **WHEN** its `error` listener count is read synchronously, before anything pipes into it
+- **THEN** it is greater than zero, so no `error` event on that stream can ever be unhandled
+
+#### Scenario: the asynchronous open fails
+
+- **GIVEN** an output path inside a directory that does not exist
+- **WHEN** the stream emits `error`
+- **THEN** the error is recorded on the entry and logged, no uncaught exception is raised, and the
+  subsequent `finalize` rejects with it even though the flush was skipped
+
+#### Scenario: a stream errors twice
+
+- **GIVEN** a stream that emits `error` and then emits a second, different `error`
+- **WHEN** `finalize` runs
+- **THEN** it rejects with the **first** error
+
+#### Scenario: the logger sink fails alongside the stream
+
+- **GIVEN** a `Logger` sink that throws — the shape the CLI's unguarded `fs.appendFileSync` sink takes
+  on a full disk
+- **WHEN** the stream's `error` listener runs, and later `finalizeQuietly` logs the rejection
+- **THEN** neither throw escapes: no `uncaughtException` is raised, `finalizeQuietly` resolves, and
+  `finalize` still rejects with the recorded error
 
 ## Design Decisions
 
@@ -156,3 +227,54 @@ guarantee, and nothing checks it against what the code does; (b) no comment at a
 reader re-derives "detaching is enough" from a pipe that visibly works.
 
 *Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### A recorded error fails the stop after `finalize`'s `try`/`finally`, never inside it
+
+**Decision**: The `error` listener records the first error on the registry entry, and `finalize`
+re-throws it only once its existing `try`/`finally` has completed without throwing. Recording is
+required; logging alone is not.
+
+**Why**: A drain rejection and a recorded write error both mean "the log is not known to be
+complete", so either satisfies the "a write error rejects" contract — but re-throwing *after* the
+`finally` gets precedence right for free and cannot replace an in-flight failure with a redundant
+one. The recording half is what closes the second face of the same defect: an errored stream
+auto-destroys, `_endAndFlush` early-returns on a destroyed stream, and a log-only listener would
+leave `finalize` with nothing to observe, resolving over an unwritten file. Both faces — a crash
+before finalization and a silently successful stop after it — come from the same missing listener,
+so both are closed at `open()`.
+
+**Rejected**: (a) throwing inside the `finally` — masks a drain rejection with a redundant error;
+(b) logging the error without recording it — leaves the silently successful stop in place, which is
+the half nothing in a run's output would reveal; (c) attaching the listener in each provider — the
+two versions would diff empty modulo a log prefix (the case the mirror rule says to share), and the
+registry already owns this bookkeeping; (d) observing the error only through `await finished(stream)`
+inside `_endAndFlush` — that listener does not exist until the stop runs and is skipped on exactly
+the destroyed stream an error produces.
+
+*Introduced by*: 260730-eyvt-ci-cost-guards-carried-defects
+
+### A listener of last resort guards its own log call, because not throwing is its contract
+
+**Decision**: The `Logger.e` call inside the stream's `error` listener sits in its own `try`/`catch`
+with an empty handler, after the error has been recorded; `finalizeQuietly`'s `Logger.e` is guarded
+the same way. Nothing else in the listener can throw.
+
+**Why**: A listener whose entire purpose is to keep an `error` event from becoming an
+`uncaughtException` cannot itself be a source of one. `Logger.e` is fallible on its own schedule — an
+unguarded sink loop reaching an unguarded `fs.appendFileSync` — so an unguarded log call there
+converts the failure being handled into the failure being prevented, on a tick Node runs with no
+enclosing `try`. Recording before logging is what makes swallowing the log line free: the stop still
+fails, and only a diagnostic line is lost. This is **not** the shape rejected in
+[/cli/session-runner.md](/cli/session-runner.md): that rejection is scoped to the
+acquisition-ordering problem, where two statements can be reordered and a local catch would patch
+one call site while the next inserted statement stays lethal. Here there is nothing to reorder.
+
+**Rejected**: (a) leaving `Logger.e` unguarded on the reading that a log call is not "fallible
+enough" — the CLI's own sink makes it fallible, and the correlated `ENOSPC` case is the exact trigger
+the listener was added for; (b) making the report-writer sink swallow its own errors instead — a
+silently failing runner log is a worse default for every other caller (the same trade
+[/cli/session-runner.md](/cli/session-runner.md) records); (c) guarding `finalize` too so a recorded
+error is logged rather than thrown — that is `finalizeQuietly`, and collapsing the two loses the
+distinction between a stop that failed and a path already reporting a failure.
+
+*Introduced by*: 260730-eyvt-ci-cost-guards-carried-defects

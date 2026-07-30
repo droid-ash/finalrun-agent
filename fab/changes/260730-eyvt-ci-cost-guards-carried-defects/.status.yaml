@@ -1,0 +1,51 @@
+id: eyvt
+name: 260730-eyvt-ci-cost-guards-carried-defects
+created: 2026-07-30T17:23:53Z
+created_by: droid-ash
+change_type: ci
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 8
+    acceptance_count: 23
+    acceptance_completed: 23
+confidence:
+    certain: 4
+    confident: 5
+    tentative: 0
+    unresolved: 0
+    score: 4.6
+    fuzzy: true
+    dimensions:
+        signal: 73.3
+        reversibility: 87.8
+        competence: 81.7
+        disambiguation: 72.8
+stage_metrics:
+    intake: {started_at: "2026-07-30T17:23:53Z", driver: fab-new, iterations: 1, completed_at: "2026-07-30T17:37:48Z"}
+    apply: {started_at: "2026-07-30T18:06:03Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-30T18:16:34Z"}
+    review: {started_at: "2026-07-30T18:16:34Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-30T18:40:57Z"}
+    hydrate: {started_at: "2026-07-30T18:40:57Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-30T18:51:39Z"}
+    ship: {started_at: "2026-07-30T18:51:39Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-30T18:51:39Z"
+    computed_at_stage: hydrate
+summary: Path-filtered, timeout-bounded and PR-cancelling drivers.yml; log write-stream error listener attached at open() with a guarded log call
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-30T18:51:39Z

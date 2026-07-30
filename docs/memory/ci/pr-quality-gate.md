@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint), enforced with a completed verdict per push and `test` required to merge (ruleset 14531661); plus the additive compile-only drivers.yml gate for the Kotlin/Swift drivers. Explicit typecheck scripts, no `--if-present` fan-outs; code-quality rules are ESLint warnings, test files exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first."
+description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint), a completed verdict per push, `test` required to merge (ruleset 14531661); plus the additive compile-only drivers.yml gate for the Kotlin/Swift drivers — path-filtered, timeout-bounded, PR-run-cancelling. No `--if-present` fan-outs; code-quality rules are ESLint warnings, tests exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first."
 ---
 # PR Quality Gate (ci)
 
@@ -8,7 +8,7 @@ description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → tes
 
 ## Overview
 
-Two workflows gate a pull request. `.github/workflows/ci.yml` is the TypeScript quality gate and the one whose verdict is required to merge; `.github/workflows/drivers.yml` is an additive compile-only gate over the native `drivers/` tree (below). Both run on `pull_request` targeting `main` and on `push` to `main` as a post-merge safety net. `ci.yml` is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and its `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
+Two workflows gate a pull request. `.github/workflows/ci.yml` is the TypeScript quality gate and the one whose verdict is required to merge; `.github/workflows/drivers.yml` is an additive compile-only gate over the native `drivers/` tree (below). Both are wired to `pull_request` targeting `main` and to `push` to `main` as a post-merge safety net — `ci.yml` unconditionally, `drivers.yml` only when the diff touches one of the driver-relevant paths its `paths:` filter names. `ci.yml` is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and its `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
 
 ## Requirements
 
@@ -122,8 +122,21 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **WHEN** a test is written for it
 - **THEN** it is placed at `src/infra/android/test/Foo.test.ts` and imports its subject as `../Foo.js`, with no runner or config change required
 
-### Requirement: Both native drivers compile on every pull request
-`.github/workflows/drivers.yml` MUST build the Android driver — the debug + androidTest APK pair, on `ubuntu-latest` with `actions/setup-java@v4` JDK 17 (AGP 8.1.4's requirement) and a gradle cache — and the iOS driver via `build-for-testing` on `macos-latest`, on every `pull_request` targeting `main` and on `push` to `main`. Both APKs are required: the driver lives under `app/src/androidTest/`, so it ships as an instrumentation-test APK and a release build produces artifacts that cannot host it. Each platform's build MUST be a single invocation of the repo's existing script — `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — never a restated gradle/xcodebuild command line, so the task list and the script's own `-Runner.app` assertions live in one place. `build-for-testing` rather than plain `build` is load-bearing for the same reason: it is what emits the `-Runner.app` the script asserts on. Like `ci.yml`, the workflow carries **no `concurrency` block**, for the reason recorded below.
+### Requirement: Both native drivers compile on every driver-relevant pull request
+`.github/workflows/drivers.yml` MUST build the Android driver — the debug + androidTest APK pair, on `ubuntu-latest` with `actions/setup-java@v4` JDK 17 (AGP 8.1.4's requirement) and a gradle cache — and the iOS driver via `build-for-testing` on `macos-latest`, on every `pull_request` targeting `main` and every `push` to `main` **whose diff touches a driver-relevant path**. Both APKs are required: the driver lives under `app/src/androidTest/`, so it ships as an instrumentation-test APK and a release build produces artifacts that cannot host it. Each platform's build MUST be a single invocation of the repo's existing script — `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — never a restated gradle/xcodebuild command line, so the task list and the script's own `-Runner.app` assertions live in one place. `build-for-testing` rather than plain `build` is load-bearing for the same reason: it is what emits the `-Runner.app` the script asserts on.
+
+**"Driver-relevant" is defined by a five-entry `paths:` filter, carried on both triggers.** The same list is duplicated verbatim under `pull_request` and under `push` and MUST stay byte-identical; each entry is derived from what the two builds actually consume:
+
+- `drivers/**` — both native trees, their gradle files, the gradle wrapper, the Xcode project, and the committed generated Swift under `drivers/ios/finalrun-ios-test/Generated/`.
+- `proto/**` — the entry a reader would not predict and the one whose omission would be invisible. `drivers/android/app/build.gradle.kts:104` adds the repo-root `proto` directory as a protobuf source dir, so the Android driver compiles `proto/finalrun/driver.proto` **from source** on every build: a proto edit can break the Kotlin compile with no file under `drivers/` changing at all. The in-file comment cites that line, so the dependency is not re-litigated from the filter alone.
+- `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — each job's single `run:` step is one of them, so a change to either changes what the gate does.
+- `.github/workflows/drivers.yml` — so a change to the gate is verified by the gate.
+
+`resources/android/` and `resources/ios/` are deliberately **absent**: they are the build scripts' output staging directories, not build inputs. Filtering `push` as well as `pull_request` is intentional — a merge whose diff touches no driver path cannot break either native build, and a merge that does touch one still matches and still runs the post-merge net (including the two-PR combination case, where each merge commit carries its own driver-path diff). A `paths` filter means the workflow does not run **at all** when nothing matching changed: the check is **absent, not green**. That is safe only because these two jobs are required by nothing (below), and the filter MUST never be copied to `ci.yml` without also adding an always-runs sentinel job.
+
+**Both jobs carry a measured job-level `timeout-minutes`** — `15` on `android`, `25` on `ios` — declared at job level so checkout and toolchain setup are inside the bound rather than only the build step. Each value is ≥2× the worst duration observed across five recorded runs (`android` worst 2m36s, ~5.8× headroom; `ios` worst 9m20s, ~2.7×) and carries an in-file comment naming that measurement, so a reader can tell a measured bound from a guessed one. `ios` is deliberately the tighter bound *relative to* its worst run because `macos-latest` bills at 10×: the cap replaces GitHub's 360-minute default, so a wedged `xcodebuild` costs 250 billable minutes instead of ~3,600. The values MUST NOT be raised to a cap so generous it defeats its own purpose — a spurious timeout is a red job a re-run clears, which is the failure direction to prefer.
+
+**A newer push cancels the PR run it replaces; a run on `main` is never cancelled.** The workflow carries a workflow-level `concurrency` block whose `group` is `drivers-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}` and whose `cancel-in-progress` is `${{ github.event_name == 'pull_request' }}`. On a pull request the group is the PR ref, so a newer push cancels the run the previous push started; on a `push` to `main` the group key is the per-run-unique `github.run_id`, so every `main` run is alone in its group and is neither cancelled, queued behind, nor evicted by another. Both halves of that key are load-bearing and neither is simplifiable — the decision below records why, and why the same block on `ci.yml` would break the guarantee `ci.yml` exists to provide.
 
 **The gate is compile-only, and that is a property of the tree rather than a judgement about thoroughness.** `drivers/android/app/src/androidTest/` *is* the driver — 24 of 25 Kotlin files — where a single `@Test` starts a gRPC server and blocks forever, with zero assertions anywhere in the tree; the only file under `app/src/test/` is an `assertEquals(4, 2+2)` scaffold, and `drivers/ios` has no test target at all. There is nothing meaningful to execute, so neither job runs `androidTest` or any XCUITest. "Drivers is green" means the native code compiles and links, never that a tap lands where it was asked to — behavioural confirmation of a native change still needs a manual device session ([/drivers/grpc-contract.md](/drivers/grpc-contract.md)).
 
@@ -135,6 +148,25 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **GIVEN** a pull request that breaks Kotlin or Swift compilation
 - **WHEN** the drivers workflow runs
 - **THEN** the corresponding job fails and the breakage is visible on the PR, while `ci.yml`'s `test` job and its required-check contract are untouched
+
+#### Scenario: a PR that cannot affect either native build
+- **GIVEN** a pull request whose diff is confined to `docs/`, `fab/`, or `packages/report-web`
+- **WHEN** the workflow's triggers are evaluated
+- **THEN** neither the `android` nor the `ios` job runs and no `drivers` check is reported
+- **AND** no merge is blocked, because ruleset `14531661` requires only `ci.yml`'s `test` context
+
+#### Scenario: a proto edit with no file under `drivers/`
+- **GIVEN** a pull request that edits `proto/finalrun/driver.proto` and nothing under `drivers/`
+- **WHEN** the triggers are evaluated
+- **THEN** the workflow runs, because `proto/**` is in the filter and the Android build compiles that file from source
+
+#### Scenario: rapid pushes to a PR, and rapid merges to `main`
+- **GIVEN** an in-flight `drivers` run on a pull request and a newer push to the same PR
+- **WHEN** the second run starts
+- **THEN** both resolve the group key to the PR ref, `cancel-in-progress` evaluates true, and the earlier run is cancelled with no merge gate affected
+- **GIVEN** two merges to `main` in rapid succession
+- **WHEN** the second run queues
+- **THEN** each run's group key is its own `github.run_id`, so neither is cancelled, queued behind, or evicted by the other
 
 #### Scenario: the drivers workflow is read for test execution
 - **GIVEN** the workflow's steps
@@ -291,25 +323,61 @@ reviewer's opinion should not gate a merge.
 *Introduced by*: 260728-xn7o-ci-verdict-every-push-required-check
 
 ### The drivers gate is a separate additive workflow, not a job in `ci.yml`
-**Decision**: The native compile gate lands as `.github/workflows/drivers.yml` with two jobs
+**Decision**: The native compile gate lives in `.github/workflows/drivers.yml` with two jobs
 (`android` on `ubuntu-latest`, `ios` on `macos-latest`), each a single call to the existing
-`scripts/build-drivers-*.sh`. `ci.yml` is not edited, and no job in the new file is named `test`.
-Like `ci.yml`, it carries no `concurrency` block.
+`scripts/build-drivers-*.sh`. `ci.yml` is not edited by it, and no job in the file is named `test`.
 **Why**: `ci.yml`'s `test` job name is a contract with ruleset `14531661`, and its job graph is a
 required-check surface — a new job inside it is a new way to detach or stall that check. A separate
 file keeps the gate additive and lets the iOS half sit on a different runner OS without a matrix
 (`release.yml` already provisions a `windows-latest` runner, so a second runner OS is established
-precedent). Omitting `concurrency` follows the same reasoning `ci.yml` records: a bare group on the
-default `queue: single` silently restores cancellation of pending runs, and a cancelled run reads
-exactly like a clean one.
+precedent). Being additive is also what makes the file's own cost controls — the `paths:` filter and
+the PR-scoped `concurrency` block (decision below) — configurations `ci.yml` may not copy.
 **Rejected**: (a) adding two steps to the `test` job — the iOS build needs macOS, which that job
 cannot provide, and it would put a slow native build in front of the required check; (b) a matrix
 job over `[ubuntu, macos]` — the two builds share no steps beyond checkout; (c) restating the
 gradle/xcodebuild invocations in the workflow — two copies of a build contract that already exists
 as a script, and the iOS script's `-Runner.app` assertions would be lost; (d) a `paths:` filter
-confining the iOS job to `drivers/ios/**` — nothing in the repo evidences a macOS-minutes
-constraint, and the gate's purpose is to guard every PR, not only the ones that look native.
+confined to `drivers/ios/**`, or applied to the `ios` job alone — the macOS-minutes constraint the
+filter answers is measured (10× billing, a 9m20s worst `ios` run, ~200 billable minutes for one
+PR's three pushes), but a filter that narrow answers it wrongly: the Android job compiles
+`proto/finalrun/driver.proto` from source, so an `ios`-only or `drivers/ios/**`-only list leaves the
+Android job paying on every PR while the one path that can break it silently goes unlisted. The
+filter is broader on both axes — `drivers/**`, `proto/**`, both build scripts and this workflow
+file — and gates both jobs together.
 *Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### A non-required additive gate may cancel a replaced run; the required check may not
+**Decision**: `drivers.yml` carries a `pull_request`-scoped `concurrency` block —
+`group: drivers-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}` with
+`cancel-in-progress: ${{ github.event_name == 'pull_request' }}` — while `ci.yml` carries no
+`concurrency` key at all. The two configurations are opposite on purpose, and the discriminator is
+**whether a merge gate consults the run**, not which workflow it is.
+**Why**: The no-cancellation rule above is load-bearing *because `test` is the required check*: a
+cancelled run at a mergeable PR tip is an unverified commit that reads exactly like a clean one, and
+ruleset `14531661` is what a merge consults. That ruleset requires exactly one context — `test`,
+pinned to `integration_id` 15368 — so nothing in `drivers.yml` gates a merge. A cancelled `drivers`
+run is visibly `cancelled`, blocks nothing, and the push that cancelled it carries a newer tip; what
+is traded is native-compile coverage of commits that are not the tip, against measured waste (the
+`ios` job bills at 10×, one PR's three pushes cost ~200 billable minutes, and an unfiltered trigger
+charges a pure-docs PR for a full Android + iOS compile). **The group key's shape is where that
+reasoning meets the platform.** The pending-eviction footgun this domain records applies here as
+much as anywhere — on the default `queue: single` GitHub cancels an existing **pending** run whenever
+a newer one queues into the same group, independently of `cancel-in-progress` — so a bare
+`group: drivers-${{ github.ref }}` would reintroduce cancellation on `main`, where no later run
+stands in for a post-merge one, and two rapid merges would silently cost the middle one its verdict.
+Scoping the key to `github.run_id` on `push` leaves every `main` run alone in its group, which is
+what lets the block coexist with the post-merge net instead of eroding it. `github.ref` is a
+non-empty string on both event types, so the `A && B || C` ternary is safe here rather than merely
+idiomatic.
+**Rejected**: (a) an unconditional `group: drivers-${{ github.ref }}` with
+`cancel-in-progress: true` — simpler to read and walks straight into the pending-eviction footgun
+above; (b) no `concurrency` block, on the reading that the required check's rule is workflow-agnostic
+— it is not: the rule protects a guarantee only a required check provides, and applying it here pays
+for replaced runs no one consults; (c) copying the block to `ci.yml` — breaks the exact guarantee
+the required check exists to give; (d) `cancel-in-progress: false` with the group kept — governs
+only the in-progress run and leaves pending runs evictable, so it buys nothing while keeping the
+hazard.
+*Introduced by*: 260730-eyvt-ci-cost-guards-carried-defects
 
 ### Compile-only is the drivers gate's honest ceiling, and it is recorded as one
 **Decision**: The gate's limitation is written down — in the workflow's own header comment and here
