@@ -1,0 +1,71 @@
+name: Drivers
+
+# Compile gate for the two native drivers under drivers/ — the only automated
+# verification they have. Before this workflow existed, nothing in
+# .github/workflows/ mentioned gradle, xcodebuild, Kotlin or Swift: a bad edit
+# to the 48 native files was caught by a dead device in someone's manual
+# session, not by a failing check.
+#
+# COMPILE ONLY — deliberately no test execution:
+#   - drivers/android/app/src/androidTest/ IS the driver (24 of 25 Kotlin
+#     files). Its single @Test starts a gRPC server and blocks forever, and
+#     there are zero assertions in the whole tree, so `connectedAndroidTest`
+#     has nothing to report and would never terminate.
+#   - drivers/ios has no unit-test target at all.
+# The gate therefore proves the native code compiles and links. It does NOT
+# prove a tap lands in the right place — that still needs a manual device
+# session. Treat "drivers is green" as "it builds", nothing more.
+#
+# This workflow is ADDITIVE and must stay that way: ci.yml's job graph and its
+# `test` job name are a contract with repo ruleset 14531661 (the required
+# status check). No job in THIS file may be named `test` — a same-named check
+# from this workflow would be indistinguishable from the required one.
+#
+# There is deliberately NO `concurrency:` block, for the reason ci.yml records
+# at length: a bare group on the default `queue: single` lets a newer run
+# cancel an existing PENDING one, and a cancelled run at a PR tip reads
+# exactly like a clean one.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # Debug + androidTest APK pair, both required: the driver lives under
+  # app/src/androidTest/, so it ships as an instrumentation-test APK and a
+  # release build produces artifacts that cannot host it.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGP 8.1.4 (drivers/android/build.gradle.kts) requires JDK 17.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            drivers/android/gradle/wrapper/gradle-wrapper.properties
+            drivers/android/**/*.gradle.kts
+
+      # The same script `npm run build:drivers:android` runs. Invoked directly
+      # so the gate needs no Node toolchain, and NOT reimplemented here: the
+      # gradle task list and the APK staging paths live in one place.
+      - name: Build the Android driver (assembleDebug + assembleDebugAndroidTest)
+        run: ./scripts/build-drivers-android.sh
+
+  # Requires a macOS runner (xcodebuild). release.yml already provisions a
+  # windows-latest runner, so a second runner OS is established precedent.
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same script `npm run build:drivers:ios` runs. It uses
+      # `build-for-testing`, not plain `build`: build-for-testing is what emits
+      # the finalrun-ios-test-Runner.app the script asserts on, and a plain
+      # build would pass while producing artifacts that cannot host the driver.
+      - name: Build the iOS driver (build-for-testing)
+        run: ./scripts/build-drivers-ios.sh

@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "PR CI gate (`npm ci` → build → typecheck → test → lint, .github/workflows/ci.yml), enforced: every PR push gets its own completed verdict, `test` required to merge (ruleset 14531661, app-pinned); explicit typecheck scripts everywhere (`local-runtime`: no-op), no `--if-present` fan-outs; code-quality rules are ESLint warnings, test files exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first, proving equivalence."
+description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint), enforced with a completed verdict per push and `test` required to merge (ruleset 14531661); plus the additive compile-only drivers.yml gate for the Kotlin/Swift drivers. Explicit typecheck scripts, no `--if-present` fan-outs; code-quality rules are ESLint warnings, test files exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first."
 ---
 # PR Quality Gate (ci)
 
@@ -8,7 +8,7 @@ description: "PR CI gate (`npm ci` → build → typecheck → test → lint, .g
 
 ## Overview
 
-The repo's pull-request quality gate is `.github/workflows/ci.yml`. It runs on `pull_request` targeting `main` (and on `push` to `main` as a post-merge safety net) and is the first automated gate the repo has. The gate is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and the `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
+Two workflows gate a pull request. `.github/workflows/ci.yml` is the TypeScript quality gate and the one whose verdict is required to merge; `.github/workflows/drivers.yml` is an additive compile-only gate over the native `drivers/` tree (below). Both run on `pull_request` targeting `main` and on `push` to `main` as a post-merge safety net. `ci.yml` is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and its `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
 
 ## Requirements
 
@@ -121,6 +121,25 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **GIVEN** a new source file at `src/infra/android/Foo.ts`
 - **WHEN** a test is written for it
 - **THEN** it is placed at `src/infra/android/test/Foo.test.ts` and imports its subject as `../Foo.js`, with no runner or config change required
+
+### Requirement: Both native drivers compile on every pull request
+`.github/workflows/drivers.yml` MUST build the Android driver — the debug + androidTest APK pair, on `ubuntu-latest` with `actions/setup-java@v4` JDK 17 (AGP 8.1.4's requirement) and a gradle cache — and the iOS driver via `build-for-testing` on `macos-latest`, on every `pull_request` targeting `main` and on `push` to `main`. Both APKs are required: the driver lives under `app/src/androidTest/`, so it ships as an instrumentation-test APK and a release build produces artifacts that cannot host it. Each platform's build MUST be a single invocation of the repo's existing script — `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — never a restated gradle/xcodebuild command line, so the task list and the script's own `-Runner.app` assertions live in one place. `build-for-testing` rather than plain `build` is load-bearing for the same reason: it is what emits the `-Runner.app` the script asserts on. Like `ci.yml`, the workflow carries **no `concurrency` block**, for the reason recorded below.
+
+**The gate is compile-only, and that is a property of the tree rather than a judgement about thoroughness.** `drivers/android/app/src/androidTest/` *is* the driver — 24 of 25 Kotlin files — where a single `@Test` starts a gRPC server and blocks forever, with zero assertions anywhere in the tree; the only file under `app/src/test/` is an `assertEquals(4, 2+2)` scaffold, and `drivers/ios` has no test target at all. There is nothing meaningful to execute, so neither job runs `androidTest` or any XCUITest. "Drivers is green" means the native code compiles and links, never that a tap lands where it was asked to — behavioural confirmation of a native change still needs a manual device session ([/drivers/grpc-contract.md](/drivers/grpc-contract.md)).
+
+**The gate is additive to the required-check contract and MUST stay so.** `drivers.yml` declares exactly two jobs, `android` and `ios`, and `ci.yml` is not edited by its introduction, so ruleset `14531661`'s required `test` context still resolves to `ci.yml`'s job alone. A job named `test` in this or any second workflow would report a context indistinguishable from the required one.
+
+**Neither native build is reproducible locally without a full native toolchain.** A JDK, the Android SDK and Xcode are all needed, and the repo's own gate (`npm run build`/`typecheck`/`test:workspaces`/`lint`) does not touch `drivers/` at all. A change to `drivers.yml` or to a native source file therefore ships on a source-level reading, and the workflow run on the pull request is the first execution that can confirm it.
+
+#### Scenario: a PR breaks native compilation
+- **GIVEN** a pull request that breaks Kotlin or Swift compilation
+- **WHEN** the drivers workflow runs
+- **THEN** the corresponding job fails and the breakage is visible on the PR, while `ci.yml`'s `test` job and its required-check contract are untouched
+
+#### Scenario: the drivers workflow is read for test execution
+- **GIVEN** the workflow's steps
+- **WHEN** they are read
+- **THEN** each platform's build is a single call to the repo's existing build script and no step runs an instrumentation or UI test
 
 #### Scenario: test discovery is a hard gate in every package
 - **GIVEN** `packages/report-web` (characterization tests under `src/**/test/` — 260727-e5nk)
@@ -270,6 +289,46 @@ the PR's head commit, but it verifies the branch tip in isolation rather than th
 the base repo; `ci.yml` deliberately carries no such trigger; (f) requiring CodeRabbit — it reports a legacy status context, and an automated
 reviewer's opinion should not gate a merge.
 *Introduced by*: 260728-xn7o-ci-verdict-every-push-required-check
+
+### The drivers gate is a separate additive workflow, not a job in `ci.yml`
+**Decision**: The native compile gate lands as `.github/workflows/drivers.yml` with two jobs
+(`android` on `ubuntu-latest`, `ios` on `macos-latest`), each a single call to the existing
+`scripts/build-drivers-*.sh`. `ci.yml` is not edited, and no job in the new file is named `test`.
+Like `ci.yml`, it carries no `concurrency` block.
+**Why**: `ci.yml`'s `test` job name is a contract with ruleset `14531661`, and its job graph is a
+required-check surface — a new job inside it is a new way to detach or stall that check. A separate
+file keeps the gate additive and lets the iOS half sit on a different runner OS without a matrix
+(`release.yml` already provisions a `windows-latest` runner, so a second runner OS is established
+precedent). Omitting `concurrency` follows the same reasoning `ci.yml` records: a bare group on the
+default `queue: single` silently restores cancellation of pending runs, and a cancelled run reads
+exactly like a clean one.
+**Rejected**: (a) adding two steps to the `test` job — the iOS build needs macOS, which that job
+cannot provide, and it would put a slow native build in front of the required check; (b) a matrix
+job over `[ubuntu, macos]` — the two builds share no steps beyond checkout; (c) restating the
+gradle/xcodebuild invocations in the workflow — two copies of a build contract that already exists
+as a script, and the iOS script's `-Runner.app` assertions would be lost; (d) a `paths:` filter
+confining the iOS job to `drivers/ios/**` — nothing in the repo evidences a macOS-minutes
+constraint, and the gate's purpose is to guard every PR, not only the ones that look native.
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### Compile-only is the drivers gate's honest ceiling, and it is recorded as one
+**Decision**: The gate's limitation is written down — in the workflow's own header comment and here
+— rather than softened. It proves compilation and linking; a native behaviour change reaching a
+device is verified by a manual session or not at all, and no Kotlin/Swift test harness is invented
+to make the coverage story look better.
+**Why**: A green check invites the reading "this was tested", and for `drivers/` that reading is
+false in a way nothing in the tree corrects. Naming the ceiling where the check is defined is what
+keeps a future reader from treating the gate as behavioural coverage — and from deleting native
+code on the strength of it. The gate's real value is that a compile break surfaces as a failing check
+rather than as a dead device in someone's manual session — a genuine guarantee nothing else in the
+repo provides; overstating it would spend that credibility.
+**Rejected**: (a) running `connectedAndroidTest` in CI — the tree's single `@Test` starts a gRPC
+server and blocks forever with zero assertions, so the job would hang rather than report; (b)
+writing a Kotlin/Swift harness as part of the same change that fixes native defects — a test
+harness is its own change with its own argument, and bundling it would hide which half the review
+certified; (c) stubbing a token native test so the gate "has tests" — a test that asserts nothing
+reads as coverage and is worse than an acknowledged gap.
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
 
 ### Platform-behaviour claims are verified against GitHub's primary sources
 **Decision**: Statements in this file about how GitHub Actions or repo rulesets behave —

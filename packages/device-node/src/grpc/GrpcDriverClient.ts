@@ -341,6 +341,12 @@ export class GrpcDriverClient {
    * Retries up to `maxRetries` times on any error, with linear backoff.
    * Default is 0 (no retry) to prevent duplicating mutating actions.
    * Read-only RPCs opt in with `maxRetries: 2`.
+   *
+   * The same rule holds one layer up: `IOSSimulator._withDriverRecovery`
+   * re-executes an operation after restarting a dead driver only for the
+   * entries of `REPLAYABLE_AFTER_DRIVER_RESTART` — the read-only captures plus
+   * the idempotent `updateAppIds`, which touches driver state only and never
+   * the device — so neither layer can turn one requested mutation into two.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async _unaryCall(

@@ -33,6 +33,33 @@ import type {
   DeviceScreenshotAndHierarchy,
 } from '../shared/DeviceRuntime.js';
 
+/**
+ * Operations `_withDriverRecovery` may re-execute after restarting a dead
+ * driver, named by the `opName` every call site already passes.
+ *
+ * The list is deliberately short. A driver can die *after* the request reached
+ * the device, so replaying anything that touches the device applies it twice —
+ * a duplicated tap or a duplicated keystroke. `GrpcDriverClient._unaryCall`
+ * defaults `maxRetries` to 0 for exactly this reason; a recovery path that
+ * re-ran the call anyway reinstated the duplication one layer up.
+ *
+ * What is safe to replay is a read whose result is the whole point of the call,
+ * plus `updateAppIds`: a restarted driver has lost its app-id list, so replaying
+ * it is required for correctness, and it mutates driver state only, never the
+ * device.
+ *
+ * An operation not listed here is NOT replayed — the default falls the safe way,
+ * so a new device action added later needs a deliberate decision to opt in.
+ */
+const REPLAYABLE_AFTER_DRIVER_RESTART: ReadonlySet<string> = new Set([
+  'captureState',
+  'checkAppInForeground',
+  'getHierarchy',
+  'getScreenshot',
+  'getScreenshotAndHierarchy',
+  'updateAppIds',
+]);
+
 export class IOSSimulator implements DeviceRuntime {
   private _commonDriverActions: CommonDriverActions;
   private _simctlClient: SimctlClient;
@@ -285,8 +312,13 @@ export class IOSSimulator implements DeviceRuntime {
     return await this._simctlClient.getAppExecutableName(this._deviceId, appIdentifier);
   }
 
+  /**
+   * `DeviceAgent.killDriver()`'s implementation for this platform: it closes the
+   * gRPC channel and nothing else. The on-device driver process stays alive — the
+   * interface name predates this port and is not renamed here.
+   */
   killDriver(): void {
-    this._commonDriverActions.killDriver();
+    this._commonDriverActions.closeDriverChannel();
   }
 
   private _getPhysicalButtonForKey(key: string): string | null {
@@ -329,6 +361,16 @@ export class IOSSimulator implements DeviceRuntime {
     return this._driverProcess.exitCode === null && !this._driverProcess.killed;
   }
 
+  /**
+   * Runs `fn`, and if it fails because the driver process has died, restarts the
+   * driver so the *next* operation can succeed.
+   *
+   * Whether this operation itself is retried depends on `opName`: only the
+   * members of {@link REPLAYABLE_AFTER_DRIVER_RESTART} are re-executed.
+   * Everything else surfaces the original error after the restart, because the
+   * driver may have died after the action already reached the device and a
+   * second attempt would apply it twice.
+   */
   private async _withDriverRecovery<T>(
     opName: string,
     fn: () => Promise<T>,
@@ -346,6 +388,13 @@ export class IOSSimulator implements DeviceRuntime {
         this._driverProcess = await this._restartDriverFn();
       } catch (restartError) {
         Logger.e(`IOSSimulator.${opName}: driver restart failed`, restartError);
+        throw error;
+      }
+
+      if (!REPLAYABLE_AFTER_DRIVER_RESTART.has(opName)) {
+        Logger.w(
+          `IOSSimulator.${opName}: driver restarted, but this operation is not replayed (it may already have reached the device) — reporting the original failure`,
+        );
         throw error;
       }
 

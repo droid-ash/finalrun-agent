@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from 'child_process';
-import * as fs from 'node:fs';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { DeviceNodeResponse, Logger, PLATFORM_ANDROID } from '@finalrun/common';
+import { LogWriteStreamRegistry } from './logWriteStream.js';
 import type { LogCaptureProvider } from './LogCaptureProvider.js';
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +20,7 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
   private readonly _execFileFn: ExecFileFn;
   private readonly _spawnFn: typeof spawn;
   private readonly _adbPath: string;
+  private readonly _logStreams = new LogWriteStreamRegistry();
 
   constructor(params?: {
     execFileFn?: ExecFileFn;
@@ -51,7 +52,7 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
         `AndroidLogcatProvider: Cleared logcat ring buffer for device ${params.deviceId}`,
       );
 
-      const writeStream = fs.createWriteStream(params.outputFilePath);
+      const writeStream = this._logStreams.open(params.outputFilePath);
       const args = ['-s', params.deviceId, 'logcat', '-v', 'threadtime'];
 
       if (params.appIdentifier) {
@@ -104,6 +105,9 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
         `AndroidLogcatProvider: Failed to start log capture for device ${params.deviceId}:`,
         error,
       );
+      // The write stream may already be open — the caller never receives a
+      // handle on this path, so closing it here is the only chance to.
+      await this._logStreams.finalizeQuietly(params.outputFilePath);
       throw new Error(
         `Failed to start Android log capture for device ${params.deviceId}: ${this._formatError(error)}`,
       );
@@ -127,6 +131,13 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
           Logger.e(
             `AndroidLogcatProvider: Failed to deliver SIGINT for log capture file: ${params.outputFilePath}`,
           );
+          // The capture is over for this caller either way, so finalize before
+          // returning: leaving the stream open leaks its fd, leaves the log file
+          // truncated at whatever was buffered, and leaves the registry entry
+          // behind for the lifetime of the process-wide capture manager — which
+          // drops its handle on this process regardless of the response below,
+          // so nothing could ever reach the stream again.
+          await this._logStreams.finalizeQuietly(params.outputFilePath, params.process.stdout);
           return new DeviceNodeResponse({
             success: false,
             message: 'Failed to send SIGINT to adb logcat process.',
@@ -139,10 +150,12 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
         `AndroidLogcatProvider: adb logcat process exited with code ${exitCode} for file: ${params.outputFilePath}`,
       );
 
-      // Flush and close the write stream piped from stdout
-      if (params.process.stdout) {
-        params.process.stdout.unpipe();
-      }
+      // Drain stdout to EOF, then end the log file's write stream and wait for
+      // its flush. `stdout.unpipe()` on its own — which is all this used to do
+      // — detaches the pipe without ending the destination, so buffered logcat
+      // output was dropped and the file the CLI copies next was truncated. A
+      // failure here fails the stop: the file is not known to be complete.
+      await this._logStreams.finalize(params.outputFilePath, params.process.stdout);
 
       return new DeviceNodeResponse({
         success: true,
@@ -153,6 +166,11 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
         `AndroidLogcatProvider: Error stopping log capture for file: ${params.outputFilePath}`,
         error,
       );
+      // `_waitForExit` threw (or the finalize above did) — finalize again so no
+      // path out of `stopLogCapture` leaves the stream open or tracked. Cheap
+      // and idempotent: an already-finalized path is untracked and returns at
+      // once.
+      await this._logStreams.finalizeQuietly(params.outputFilePath, params.process.stdout);
       return new DeviceNodeResponse({
         success: false,
         message: `Error stopping Android log capture: ${this._formatError(error)}`,

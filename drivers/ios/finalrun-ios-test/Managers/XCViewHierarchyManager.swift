@@ -30,6 +30,13 @@ class XCViewHierarchyManager {
     static let springboardApplication = XCUIApplication(bundleIdentifier: springboardBundleId)
     static let snapshotMaxDepth = 60
     private let compressionQuality: CGFloat = 0 // Most compressed, 1: Least compressed.
+
+    /// Frame rates the streaming timer accepts, mirroring the Android driver's
+    /// `frameRate.coerceIn(1, 60)` in TestUtils.calculateFrameDelay. Below 1 the
+    /// interval is unbounded; above 60 the hierarchy snapshot cannot keep up.
+    private static let streamingFpsRange = 1...60
+    /// Used when StartStreaming omits `fps`.
+    private static let defaultStreamingFps = 1
     
     private var sentImageData: Data?
     private var sentFlattenedHierarchy: [XCViewHierarchy]?
@@ -48,7 +55,18 @@ class XCViewHierarchyManager {
         stopTimer()
         removeDataForComparison()
         guard hierarchyTimer == nil else { return }
-        hierarchyTimer =  Timer.scheduledTimer(withTimeInterval: Double(1/(startStreamingPayload.fps ?? 1)), repeats: true) { timer in
+        // Frame interval in seconds = 1 / fps, and the division MUST happen in
+        // Double. Do NOT shorten this to `Double(1 / fps)`: that divides two
+        // Ints and only then widens, so 1/24 == 0, the interval becomes 0, and
+        // the timer fires as fast as the run loop allows. Android hit the same
+        // trap and records it in TestUtils.calculateFrameDelay
+        // (`1000.0 / fps.toDouble()`).
+        let requestedFps = startStreamingPayload.fps ?? Self.defaultStreamingFps
+        let fps = min(
+            max(requestedFps, Self.streamingFpsRange.lowerBound),
+            Self.streamingFpsRange.upperBound
+        )
+        hierarchyTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(fps), repeats: true) { timer in
             self.sendXCViewHierarchy(with: startStreamingPayload)
         }
     }

@@ -266,8 +266,13 @@ export class AndroidDevice implements DeviceRuntime {
     }
   }
 
+  /**
+   * `DeviceAgent.killDriver()`'s implementation for this platform: it closes the
+   * gRPC channel and nothing else. The on-device driver process stays alive — the
+   * interface name predates this port and is not renamed here.
+   */
   killDriver(): void {
-    this._commonDriverActions.killDriver();
+    this._commonDriverActions.closeDriverChannel();
   }
 
   private _toResponse(result: AndroidCommandResult): DeviceNodeResponse {

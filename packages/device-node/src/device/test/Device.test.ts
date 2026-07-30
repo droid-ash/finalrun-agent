@@ -337,3 +337,187 @@ test('Device.closeConnection cleans up active recordings before closing the runt
 
   assert.deepEqual(calls, ['cleanup', 'close']);
 });
+
+test('Device notifies a registered disconnection listener when an action fails while disconnected', async () => {
+  const notifications: Array<{ deviceUUID: string; reason: string }> = [];
+  const runtime = createRuntime({
+    isConnected() {
+      return false;
+    },
+    async tapPercent() {
+      throw new Error('gRPC channel closed');
+    },
+  });
+
+  const device = new Device({
+    deviceInfo: createIOSDeviceInfo(),
+    runtime,
+  });
+  device.listenForDeviceDisconnection({
+    onDeviceDisconnected(deviceUUID, reason) {
+      notifications.push({ deviceUUID, reason });
+    },
+  });
+
+  const request = new DeviceActionRequest({
+    requestId: 'req-disconnect',
+    action: new TapPercentAction({
+      point: new PointPercent({ xPercent: 0.5, yPercent: 0.5 }),
+    }),
+  });
+
+  const first = await device.executeAction(request);
+
+  assert.equal(first.success, false);
+  assert.deepEqual(notifications, [
+    { deviceUUID: 'SIM-1', reason: 'gRPC channel closed' },
+  ]);
+
+  // One dead connection is one disconnection, however many actions fail on it.
+  await device.executeAction(request);
+  assert.equal(notifications.length, 1);
+});
+
+test('Device does not notify the disconnection listener when the runtime is still connected', async () => {
+  let notified = 0;
+  const runtime = createRuntime({
+    async tapPercent() {
+      throw new Error('element not found');
+    },
+  });
+
+  const device = new Device({
+    deviceInfo: createIOSDeviceInfo(),
+    runtime,
+  });
+  device.listenForDeviceDisconnection({
+    onDeviceDisconnected() {
+      notified += 1;
+    },
+  });
+
+  const response = await device.executeAction(
+    new DeviceActionRequest({
+      requestId: 'req-still-connected',
+      action: new TapPercentAction({
+        point: new PointPercent({ xPercent: 0.5, yPercent: 0.5 }),
+      }),
+    }),
+  );
+
+  assert.equal(response.success, false);
+  assert.equal(notified, 0, 'an ordinary action failure is not a disconnection');
+});
+
+test('Device clearListener stops disconnection notifications', async () => {
+  let notified = 0;
+  const runtime = createRuntime({
+    isConnected() {
+      return false;
+    },
+    async tapPercent() {
+      throw new Error('gRPC channel closed');
+    },
+  });
+
+  const device = new Device({
+    deviceInfo: createIOSDeviceInfo(),
+    runtime,
+  });
+  device.listenForDeviceDisconnection({
+    onDeviceDisconnected() {
+      notified += 1;
+    },
+  });
+  device.clearListener();
+
+  await device.executeAction(
+    new DeviceActionRequest({
+      requestId: 'req-cleared',
+      action: new TapPercentAction({
+        point: new PointPercent({ xPercent: 0.5, yPercent: 0.5 }),
+      }),
+    }),
+  );
+
+  assert.equal(notified, 0);
+});
+
+test('Device still returns the action failure when the disconnection listener throws', async () => {
+  let notified = 0;
+  const runtime = createRuntime({
+    isConnected() {
+      return false;
+    },
+    async tapPercent() {
+      throw new Error('gRPC channel closed');
+    },
+  });
+
+  const device = new Device({
+    deviceInfo: createIOSDeviceInfo(),
+    runtime,
+  });
+  device.listenForDeviceDisconnection({
+    onDeviceDisconnected() {
+      notified += 1;
+      throw new Error('listener exploded');
+    },
+  });
+
+  const request = new DeviceActionRequest({
+    requestId: 'req-throwing-listener',
+    action: new TapPercentAction({
+      point: new PointPercent({ xPercent: 0.5, yPercent: 0.5 }),
+    }),
+  });
+
+  // The notification is best-effort; the action's own outcome is the contract.
+  const response = await device.executeAction(request);
+
+  assert.equal(response.success, false);
+  assert.equal(response.message, 'Action failed: gRPC channel closed');
+  assert.equal(notified, 1);
+
+  // The one-shot is armed before the handler runs, so a thrown handler is not
+  // retried by the next failing action.
+  const second = await device.executeAction(request);
+  assert.equal(second.success, false);
+  assert.equal(second.message, 'Action failed: gRPC channel closed');
+  assert.equal(notified, 1);
+});
+
+test('Device still returns the action failure when the runtime connection probe throws', async () => {
+  let notified = 0;
+  const runtime = createRuntime({
+    isConnected(): boolean {
+      throw new Error('channel state unavailable');
+    },
+    async tapPercent() {
+      throw new Error('gRPC channel closed');
+    },
+  });
+
+  const device = new Device({
+    deviceInfo: createIOSDeviceInfo(),
+    runtime,
+  });
+  device.listenForDeviceDisconnection({
+    onDeviceDisconnected() {
+      notified += 1;
+    },
+  });
+
+  const response = await device.executeAction(
+    new DeviceActionRequest({
+      requestId: 'req-throwing-probe',
+      action: new TapPercentAction({
+        point: new PointPercent({ xPercent: 0.5, yPercent: 0.5 }),
+      }),
+    }),
+  );
+
+  assert.equal(response.success, false);
+  assert.equal(response.message, 'Action failed: gRPC channel closed');
+  assert.equal(notified, 0, 'an unusable connection probe is not a disconnection signal');
+});

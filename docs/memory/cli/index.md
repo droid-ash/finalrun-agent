@@ -1,5 +1,5 @@
 ---
-description: "CLI orchestration, report writing, HTML generation"
+description: "CLI orchestration, report writing, HTML generation, and the host preflight environment checks"
 ---
 # cli
 
@@ -7,5 +7,6 @@ description: "CLI orchestration, report writing, HTML generation"
 
 | File | Description |
 |------|-------------|
+| [host-preflight](host-preflight.md) | hostPreflight.ts — the host environment checks the CLI runs before a session, and the platform-branched command-on-PATH probe behind them: `resolveCommandPath` locates with `where` on win32 (first output line) and `which` elsewhere, through defaulted process-boundary overrides that make both branches test-reachable without stubbing globals. |
 | [report-writer](report-writer.md) | ReportWriter (packages/cli/src/reportWriter.ts) — the run directory it emits (runner.log, input/, tests/<id>/, summary.json, run.json), the secret-redaction contract every write path crosses, device-log copy-then-redact, first-failure precedence, and the emitted-JSON key-omission contract that makes an absent optional field part of the schema |
 | [session-runner](session-runner.md) | sessionRunner.ts — prepareTestSession/executeTestOnSession/runGoal: the per-call ExecutionSessionState every phase records its acquisition into, the single finally that releases whatever is still held, the recording and device-log capture lifecycles, the guarded (never `!`-asserted) install-override preconditions and model-owned platform derivation, and the CLI's two sanctioned dependency seams (TestSessionDeps and testRunnerDependencies) |

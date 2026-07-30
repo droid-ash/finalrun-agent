@@ -14,6 +14,13 @@ type ExecFileFn = (
 ) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
 
 /**
+ * x264 Constant Rate Factor used when re-encoding a finished recording.
+ * 40 is far above the visually-lossless range (~18-23): a run's video is a
+ * diagnostic artifact uploaded per test, so file size dominates fidelity.
+ */
+const COMPRESSION_CRF = '40';
+
+/**
  * iOS screen recording via `xcrun simctl io <udid> recordVideo`.
  * Mirrors the studio-flutter implementation for booted simulators.
  */
@@ -215,12 +222,15 @@ export class IOSRecordingProvider implements RecordingProvider {
         '-c:v',
         'libx264',
         '-crf',
-        '40',
+        COMPRESSION_CRF,
         compressedFilePath,
       ]);
 
       await fsp.access(compressedFilePath);
-      await fsp.rm(originalFilePath, { force: true });
+      // Rename straight over the original. Both paths are in the same
+      // directory, where POSIX rename() replaces the destination atomically, so
+      // deleting the original first buys nothing — and if the rename then fails,
+      // the recording is gone with no copy left anywhere.
       await fsp.rename(compressedFilePath, originalFilePath);
 
       const finalFileStats = await fsp.stat(originalFilePath);

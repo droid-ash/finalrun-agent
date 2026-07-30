@@ -4,6 +4,7 @@ import { DeviceNodeResponse, PLATFORM_ANDROID, PLATFORM_IOS } from '@finalrun/co
 import {
   formatHostPreflightReport,
   hasBlockingPreflightFailures,
+  resolveCommandPath,
   runHostPreflight,
   shouldBlockLocalRunPreflight,
   type HostPreflightDependencies,
@@ -182,4 +183,71 @@ test('runHostPreflight only evaluates the requested platform scope', async () =>
   }));
 
   assert.equal(result.checks.some((check) => check.platform === PLATFORM_IOS), false);
+});
+
+test('resolveCommandPath uses `where` on Windows and returns the first match', async () => {
+  const calls: Array<{ file: string; args: readonly string[] }> = [];
+
+  const resolved = await resolveCommandPath('adb', {
+    platform: 'win32',
+    async execFile(file, args) {
+      calls.push({ file, args });
+      // `where` prints one absolute path per match, newest PATH entry first.
+      return {
+        stdout: 'C:\\Android\\platform-tools\\adb.exe\r\nC:\\Other\\adb.exe\r\n',
+        stderr: '',
+      };
+    },
+    async access() {},
+  });
+
+  assert.equal(resolved, 'C:\\Android\\platform-tools\\adb.exe');
+  assert.deepEqual(calls, [{ file: 'where', args: ['adb'] }]);
+});
+
+test('resolveCommandPath uses `which` on non-Windows platforms', async () => {
+  const calls: Array<{ file: string; args: readonly string[] }> = [];
+
+  const resolved = await resolveCommandPath('adb', {
+    platform: 'darwin',
+    async execFile(file, args) {
+      calls.push({ file, args });
+      return { stdout: '/usr/local/bin/adb\n', stderr: '' };
+    },
+    async access() {},
+  });
+
+  assert.equal(resolved, '/usr/local/bin/adb');
+  assert.deepEqual(calls, [{ file: 'which', args: ['adb'] }]);
+});
+
+test('resolveCommandPath returns null when the locator fails or the path is unusable', async () => {
+  const missing = await resolveCommandPath('adb', {
+    platform: 'win32',
+    async execFile() {
+      throw new Error('INFO: Could not find files for the given pattern(s).');
+    },
+    async access() {},
+  });
+  assert.equal(missing, null);
+
+  const empty = await resolveCommandPath('adb', {
+    platform: 'win32',
+    async execFile() {
+      return { stdout: '\r\n', stderr: '' };
+    },
+    async access() {},
+  });
+  assert.equal(empty, null);
+
+  const inaccessible = await resolveCommandPath('adb', {
+    platform: 'darwin',
+    async execFile() {
+      return { stdout: '/usr/local/bin/adb\n', stderr: '' };
+    },
+    async access() {
+      throw new Error('ENOENT');
+    },
+  });
+  assert.equal(inaccessible, null);
 });

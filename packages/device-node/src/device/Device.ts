@@ -54,6 +54,7 @@ export class Device implements DeviceAgent {
   private _runtime: DeviceRuntime;
   private _apiKey: string = '';
   private _disconnectionCallback: ((deviceUUID: string, reason: string) => void) | null = null;
+  private _disconnectionNotified: boolean = false;
   private _recordingController: DeviceRecordingController;
   private _logCaptureController: DeviceLogCaptureController;
 
@@ -97,10 +98,56 @@ export class Device implements DeviceAgent {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       Logger.e(`Action execution failed: ${message}`);
+      this._notifyIfDisconnected(message);
       return new DeviceNodeResponse({
         success: false,
         message: `Action failed: ${message}`,
       });
+    }
+  }
+
+  /**
+   * Fires the handler registered by {@link listenForDeviceDisconnection}, if the
+   * runtime has stopped reporting a connection.
+   *
+   * An action that threw while `runtime.isConnected()` is false is the only
+   * disconnection signal `Device` receives: nothing in the stack emits a
+   * disconnection event to subscribe to, so this is where a lost connection
+   * becomes observable. Notifies at most once per registration — a single dead
+   * connection otherwise produces one callback per subsequent failing action —
+   * and re-arms when a handler is registered again.
+   *
+   * Never throws. It is called from `executeAction`'s `catch`, so an exception
+   * escaping it would make `executeAction` **reject** instead of returning the
+   * `Action failed: …` response its contract promises, and would replace the
+   * original action error with an unrelated one. Both remaining steps run
+   * foreign code — the runtime's `isConnected()` and the caller-supplied
+   * handler — so both are guarded: the notification is best-effort, the action's
+   * own reported outcome is not.
+   */
+  private _notifyIfDisconnected(reason: string): void {
+    const notifyDisconnected = this._disconnectionCallback;
+    if (!notifyDisconnected || this._disconnectionNotified) {
+      return;
+    }
+
+    try {
+      if (this._runtime.isConnected()) {
+        return;
+      }
+
+      // Armed before the call, so a handler that throws is still not called a
+      // second time by the next failing action.
+      this._disconnectionNotified = true;
+      Logger.w(
+        `Device ${this._deviceInfo.deviceUUID} appears disconnected; notifying listener: ${reason}`,
+      );
+      notifyDisconnected(this._deviceInfo.deviceUUID, reason);
+    } catch (error) {
+      Logger.w(
+        `Device ${this._deviceInfo.deviceUUID}: disconnection listener notification failed:`,
+        error,
+      );
     }
   }
 
@@ -240,6 +287,11 @@ export class Device implements DeviceAgent {
     await this._runtime.close();
   }
 
+  /**
+   * `DeviceAgent.killDriver()`'s facade: forwards to the runtime, which closes
+   * the gRPC channel to the on-device driver and nothing else. The driver
+   * process stays alive — the name predates this port and is not renamed here.
+   */
   killDriver(): void {
     this._runtime.killDriver();
   }
@@ -252,14 +304,22 @@ export class Device implements DeviceAgent {
     return this._deviceInfo.deviceUUID;
   }
 
+  /**
+   * Registers a handler invoked when this device is observed to have
+   * disconnected — see `_notifyIfDisconnected` for what counts as observing it.
+   * Registering re-arms the one-shot, so a caller that re-registers after a
+   * reconnect is notified again.
+   */
   listenForDeviceDisconnection(callbacks: {
     onDeviceDisconnected: (deviceUUID: string, reason: string) => void;
   }): void {
     this._disconnectionCallback = callbacks.onDeviceDisconnected;
+    this._disconnectionNotified = false;
   }
 
   clearListener(): void {
     this._disconnectionCallback = null;
+    this._disconnectionNotified = false;
   }
 
   async startRecording(recordingRequest: RecordingRequest): Promise<DeviceNodeResponse> {

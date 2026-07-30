@@ -13,12 +13,31 @@ fun createErrorResponse(id: String, errorMsg: String): ActionResponse {
     )
 }
 
+/** Inclusive range a PointPercent coordinate must fall in — see the KDoc below. */
+private val SCREEN_FRACTION_RANGE = 0.0..1.0
+
+/**
+ * Convert a PointPercent coordinate to absolute screen pixels.
+ *
+ * UNIT CONTRACT: [xP] and [yP] are FRACTIONS in 0.0..1.0, not 0–100
+ * percentages, despite the proto field names `x_percent`/`y_percent`. The
+ * screen centre is (0.5, 0.5). Do NOT reintroduce a `/ 100`: the client sends
+ * fractions (`PointPercent.fromJson({ xPercent: 0.25, … })` in
+ * packages/common/src/models/test/DeviceAction.test.ts) and the iOS driver
+ * multiplies without a divisor, so dividing here puts every tap within a few
+ * pixels of the top-left corner. The range is stated on the proto message too,
+ * so the three implementations can be checked against one another.
+ *
+ * 0.0 is a legitimate coordinate — the left or top edge — so it is NOT
+ * rejected. `null` means the caller sent something outside 0.0..1.0 (including
+ * NaN, which is in no range): most likely a 0–100 caller, whose point would
+ * otherwise resolve far off screen. `DriverServiceImpl.tapPercent` turns that
+ * null into an explicit failure response rather than tapping.
+ */
 fun getXYPercentOnScreen(xP: Double, yP: Double): Pair<Int, Int>? {
-    val screenWidth = getScreenWidth()
-    val screenHeight = getScreenHeight()
-    if (xP == 0.0 || yP == 0.0) return null
-    val x = ((xP * screenWidth) / 100).toInt()
-    val y = ((yP * screenHeight) / 100).toInt()
+    if (xP !in SCREEN_FRACTION_RANGE || yP !in SCREEN_FRACTION_RANGE) return null
+    val x = (xP * getScreenWidth()).toInt()
+    val y = (yP * getScreenHeight()).toInt()
     return Pair(x, y)
 }
 

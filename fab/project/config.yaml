@@ -4,9 +4,15 @@ project:
 source_paths:
     - packages/
     - drivers/
+# source_paths includes drivers/, so test_paths must be able to match a native
+# test file too — with TypeScript-only globs, no pattern could ever match the
+# Kotlin or Swift trees and fab tooling saw them as source with no tests.
 test_paths:
     - "**/*.test.ts"
     - "**/*.spec.ts"
+    - "**/src/test/**/*.kt"
+    - "**/src/androidTest/**/*.kt"
+    - "**/*Tests.swift"
 
 # >>> fab reference (kit 2.16.8) >>> ---------------------------------------
 # Overridable fields you have NOT overridden, with current defaults.

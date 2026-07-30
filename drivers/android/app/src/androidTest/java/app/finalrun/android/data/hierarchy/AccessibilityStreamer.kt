@@ -30,6 +30,20 @@ object AccessibilityStreamer {
         ListView::class.java.name, TableLayout::class.java.name
     )
 
+    /**
+     * Depth-first search for the focused node under [node].
+     *
+     * The polling loop does NOT guarantee bounds stability, despite the
+     * function's name: it returns the node on the first reading that matches the
+     * bounds captured on entry, and returns the same node unconditionally once
+     * the ten polls are exhausted. Both exits produce the same value, so the
+     * only observable effect of the loop is a delay of up to ~5s for a node
+     * whose bounds keep changing. Treat the result as "the focused node", never
+     * as "a node that has settled".
+     *
+     * Implementing a real stability wait would change streaming latency in
+     * native code with no test coverage, so it is deliberately left alone.
+     */
     private suspend fun findStableFocusedNodeInRoot(
         node: AccessibilityNodeInfo?
     ): AccessibilityNodeInfo? {
@@ -44,11 +58,13 @@ object AccessibilityStreamer {
             return null
         }
 
-        // 2) We have a focused node—now check that its bounds stay the same for 5 seconds
+        // 2) Poll the focused node's bounds: up to 10 readings, 500ms apart.
+        // `initialBounds` is never re-captured, so this exits on the first
+        // reading equal to the entry bounds — and returns the node anyway when
+        // the readings run out.
         val initialBounds = Rect().also { node.getBoundsInScreen(it) }
         val tempBounds = Rect()
 
-        // Loop 10 times, sleeping 500ms between checks
         for (i in 1..10) {
             delay(500)
             node.getBoundsInScreen(tempBounds)
@@ -66,6 +82,25 @@ object AccessibilityStreamer {
         return null
     }
 
+    /**
+     * THE VISIBILITY-FILTERED TRAVERSAL. `processNodeRecursive` descends into a
+     * child only when `child.isVisibleToUser || insideWebView`, so off-screen and
+     * hidden subtrees are absent from the result. Reads the CACHED window roots
+     * (`getWindowRootsFast`).
+     *
+     * Callers: the two streaming paths — `DriverServiceImpl.startStreaming` (the
+     * gRPC `StartStreaming` stream) and `ScreenStreamer.startStreaming` (the
+     * legacy WebSocket frame loop).
+     *
+     * This is one of THREE hierarchy traversals in this object, and they do not
+     * agree — see [getHierarchyForStreaming] and
+     * [getHierarchyForStreamingRefreshed]. A client therefore receives a
+     * different tree depending on which RPC it calls, and the planner prompt is
+     * built from whichever it got. The divergence is documented rather than
+     * unified on purpose: unifying it changes what the planner LLM sees, in
+     * native code with zero test coverage, and belongs in its own change with
+     * evidence. Do not "align" these three without that evidence.
+     */
     fun getHierarchy(screenWidth: Int, screenHeight: Int): List<AccNode> {
         val nodeList = mutableListOf<AccNode>()
         val displayRect = getDisplayRect()
@@ -81,6 +116,17 @@ object AccessibilityStreamer {
         return nodeList
     }
 
+    /**
+     * AN UNFILTERED TRAVERSAL over the CACHED window roots
+     * (`getWindowRootsFast`). `getJsonArrForNodeInfo` applies no
+     * `isVisibleToUser` filter, so this returns a strictly larger tree than
+     * [getHierarchy] for the same screen.
+     *
+     * Despite the name, streaming does NOT use this: callers are
+     * `ScreenStreamer.sendHierarchy` (the legacy WebSocket one-off hierarchy
+     * message) and `DeviceActions.getHierarchy()`. See [getHierarchy] for the
+     * three-way divergence and why it is left in place.
+     */
     fun getHierarchyForStreaming(screenWidth: Int, screenHeight: Int): JSONArray {
         val jsonArray = JSONArray()
         val roots = getWindowRootsFast()
@@ -97,7 +143,15 @@ object AccessibilityStreamer {
     }
 
     /**
-     * Build hierarchy JSON with a refreshed accessibility cache; use for one-off requests.
+     * AN UNFILTERED TRAVERSAL over REFRESHED window roots (`getWindowRoots`,
+     * which refreshes the accessibility cache first). Same node set as
+     * [getHierarchyForStreaming]; the difference is cache freshness, which costs
+     * a refresh per call and is why it is reserved for one-off requests.
+     *
+     * Callers: the gRPC `GetHierarchy` and `GetScreenshotAndHierarchy` RPCs
+     * (`DriverServiceImpl`). Those two RPCs therefore return a DIFFERENT tree
+     * from the streaming path, which uses the visibility-filtered
+     * [getHierarchy] — see its doc comment for the divergence and why it stands.
      */
     fun getHierarchyForStreamingRefreshed(screenWidth: Int, screenHeight: Int): JSONArray {
         val jsonArray = JSONArray()
