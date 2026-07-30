@@ -235,7 +235,13 @@ export class GrpcDriverClient {
     permissions?: Record<string, string>;
     shouldUninstallBeforeLaunch?: boolean;
   }): Promise<GrpcResponse> {
-    return this._unaryCall('launchApp', params, { timeoutMs: 60000, maxRetries: 2 }); // 60s timeout like Dart; retries enable driver recovery on iOS
+    // 60s timeout; the retries here enable driver recovery on iOS.
+    // NOTE: this is the one documented exception to `_unaryCall`'s "retries are
+    // for read-only or idempotent RPCs" rule — a launch is mutating, so an error
+    // raised after the driver already processed it can produce a second launch.
+    // Retained deliberately (pre-existing, load-bearing for iOS recovery);
+    // narrowing it is a behaviour change and is out of this change's scope.
+    return this._unaryCall('launchApp', params, { timeoutMs: 60000, maxRetries: 2 });
   }
 
   /** Kill a running app. */
@@ -339,14 +345,22 @@ export class GrpcDriverClient {
   /**
    * Make a unary gRPC call with optional retry.
    * Retries up to `maxRetries` times on any error, with linear backoff.
-   * Default is 0 (no retry) to prevent duplicating mutating actions.
-   * Read-only RPCs opt in with `maxRetries: 2`.
+   * Default is 0 (no retry) to prevent duplicating mutating actions. Callers
+   * opt in with `maxRetries: 2`, and every opted-in RPC is read-only or
+   * idempotent — `getDeviceScale`, `getScreenDimension`, `getAppList`,
+   * `checkAppInForeground`, `updateAppIds` — **with one exception**:
+   * `launchApp` opts in too (see its call site), and a launch IS mutating. That
+   * retry predates this classification and is load-bearing for iOS driver
+   * recovery, so it is left as-is rather than silently narrowed here; a launch
+   * that the driver processed before the error can therefore be issued more
+   * than once. Do not read the paragraph below as covering it.
    *
-   * The same rule holds one layer up: `IOSSimulator._withDriverRecovery`
+   * One layer up the rule holds without exception: `IOSSimulator._withDriverRecovery`
    * re-executes an operation after restarting a dead driver only for the
    * entries of `REPLAYABLE_AFTER_DRIVER_RESTART` — the read-only captures plus
    * the idempotent `updateAppIds`, which touches driver state only and never
-   * the device — so neither layer can turn one requested mutation into two.
+   * the device. `launchApp` is deliberately absent from that set, so the
+   * recovery layer never adds a replay on top of the retries above.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async _unaryCall(
