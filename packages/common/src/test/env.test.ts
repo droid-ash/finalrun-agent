@@ -1,6 +1,83 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { parseModel, parseReasoningLevel } from '../env.js';
+import { CliEnv, parseModel, parseReasoningLevel } from '../env.js';
+
+/** Create a temp directory containing the given dotenv files. */
+function createTempDotEnvDir(files: Record<string, string>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'finalrun-clienv-'));
+  for (const [fileName, contents] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, fileName), contents, 'utf-8');
+  }
+  return dir;
+}
+
+test('CliEnv.load: .env.<env> wins over plain .env for shared keys; both files contribute', () => {
+  const dir = createTempDotEnvDir({
+    '.env.dev': ['SHARED=from-env-dev', 'ONLY_DEV=dev-value'].join('\n'),
+    '.env': ['SHARED=from-plain', 'ONLY_PLAIN=plain-value'].join('\n'),
+  });
+
+  try {
+    const env = new CliEnv();
+    env.load('dev', { cwd: dir, processEnv: {} });
+    assert.equal(env.get('SHARED'), 'from-env-dev');
+    assert.equal(env.get('ONLY_DEV'), 'dev-value');
+    assert.equal(env.get('ONLY_PLAIN'), 'plain-value');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CliEnv.load: process env takes highest precedence over both .env files', () => {
+  const dir = createTempDotEnvDir({
+    '.env.dev': 'SHARED=from-env-dev\n',
+    '.env': 'SHARED=from-plain\n',
+  });
+
+  try {
+    const env = new CliEnv();
+    env.load('dev', { cwd: dir, processEnv: { SHARED: 'from-process' } });
+    assert.equal(env.get('SHARED'), 'from-process');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CliEnv.load: plain .env is loaded even when no envName is given', () => {
+  const dir = createTempDotEnvDir({
+    '.env.dev': 'ONLY_DEV=dev-value\n',
+    '.env': 'ONLY_PLAIN=plain-value\n',
+  });
+
+  try {
+    const env = new CliEnv();
+    env.load(undefined, { cwd: dir, processEnv: {} });
+    assert.equal(env.get('ONLY_PLAIN'), 'plain-value');
+    assert.equal(env.get('ONLY_DEV'), undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CliEnv.load: includeDotEnv false skips both .env files but keeps process env', () => {
+  const dir = createTempDotEnvDir({
+    '.env.dev': 'ONLY_DEV=dev-value\n',
+    '.env': 'ONLY_PLAIN=plain-value\n',
+  });
+
+  try {
+    const env = new CliEnv();
+    env.load('dev', { cwd: dir, includeDotEnv: false, processEnv: { FROM_PROCESS: 'yes' } });
+    assert.equal(env.get('ONLY_DEV'), undefined);
+    assert.equal(env.get('ONLY_PLAIN'), undefined);
+    assert.equal(env.get('FROM_PROCESS'), 'yes');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('parseModel requires an explicit model value', () => {
   assert.throws(

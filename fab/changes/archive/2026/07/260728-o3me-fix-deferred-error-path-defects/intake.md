@@ -338,7 +338,7 @@ constant for fixes 2 and 3.)
 | cli | `sessionRunner.ts` (two sites) | `src/test/sessionRunner.test.ts` |
 | cloud-core | `submit.ts`, `appBundle.ts` | `src/test/submit.test.ts` |
 
-**Blast radius.** Four fixes change observable behaviour on error paths (1, 5, 6, 7); one changes
+**Blast radius.** Four fixes change observable behaviour on error paths (1, 5, 6, 7); two change
 memory retention only (2, 3); one changes nothing observable (4). No happy path changes in any of
 the seven.
 

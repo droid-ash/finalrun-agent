@@ -76,6 +76,15 @@ export default tseslint.config(
     },
   },
   {
+    // Test files are exempt from max-lines-per-function ONLY. A long test body is
+    // usually inlined arrange — fixtures and a hand-built harness — and hoisting
+    // that into helpers moves the setup away from the assertions it explains.
+    // `complexity` and `max-depth` deliberately stay ON: they catch branching
+    // logic inside a test, and a test that branches can pass for the wrong reason.
+    files: ['**/test/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    rules: { 'max-lines-per-function': 'off' },
+  },
+  {
     files: ['**/*.{ts,tsx,mts,cts,js,mjs,cjs}'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

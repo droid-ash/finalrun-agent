@@ -39,32 +39,40 @@ export class CliEnv {
     this._values.clear();
     const workingDirectory = options?.cwd ?? process.cwd();
     const processEnv = options?.processEnv ?? process.env;
+    const includeDotEnv = options?.includeDotEnv !== false;
 
-    if (options?.includeDotEnv !== false && envName) {
-      const envFile = path.resolve(workingDirectory, `.env.${envName}`);
-      if (fs.existsSync(envFile)) {
-        const parsed = dotenv.parse(fs.readFileSync(envFile, 'utf-8'));
-        for (const [key, value] of Object.entries(parsed)) {
-          this._values.set(key, value);
-        }
-      }
+    if (includeDotEnv && envName) {
+      this._mergeDotEnvFile(path.resolve(workingDirectory, `.env.${envName}`), {
+        keepExisting: false,
+      });
     }
 
-    if (options?.includeDotEnv !== false) {
-      const plainEnvFile = path.resolve(workingDirectory, '.env');
-      if (fs.existsSync(plainEnvFile)) {
-        const parsed = dotenv.parse(fs.readFileSync(plainEnvFile, 'utf-8'));
-        for (const [key, value] of Object.entries(parsed)) {
-          if (!this._values.has(key)) {
-            this._values.set(key, value);
-          }
-        }
-      }
+    // Plain .env fills only the keys .env.<envName> did not set.
+    if (includeDotEnv) {
+      this._mergeDotEnvFile(path.resolve(workingDirectory, '.env'), {
+        keepExisting: true,
+      });
     }
 
     // OS environment variables take highest precedence
     for (const [key, value] of Object.entries(processEnv)) {
       if (value !== undefined) {
+        this._values.set(key, value);
+      }
+    }
+  }
+
+  /**
+   * Merge a dotenv file (when it exists) into the value map. With
+   * `keepExisting`, keys already present in the map are left untouched.
+   */
+  private _mergeDotEnvFile(envFile: string, options: { keepExisting: boolean }): void {
+    if (!fs.existsSync(envFile)) {
+      return;
+    }
+    const parsed = dotenv.parse(fs.readFileSync(envFile, 'utf-8'));
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!options.keepExisting || !this._values.has(key)) {
         this._values.set(key, value);
       }
     }

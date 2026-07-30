@@ -5,6 +5,16 @@
 import { PLATFORM_ANDROID, PLATFORM_IOS } from '../constants.js';
 
 /**
+ * `??` as a function: `value` unless it is null/undefined, else `fallback`.
+ * Falsy-but-present values (`''`, `false`, `0`) are KEPT — this must never
+ * become a truthiness check. Typed-params counterpart of `Hierarchy._pick`'s
+ * fallback rule.
+ */
+function orDefault<T>(value: T | null | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+/**
  * Represents a single node in the UI hierarchy tree.
  *
  * Dart equivalent: HierarchyNode in Hierarchy.dart
@@ -42,19 +52,19 @@ export class HierarchyNode {
     children?: HierarchyNode[];
   }) {
     this.index = params.index;
-    this.text = params.text ?? null;
-    this.accessibilityText = params.accessibilityText ?? null;
-    this.id = params.id ?? null;
-    this.clazz = params.clazz ?? null;
-    this.bounds = params.bounds ?? null;
-    this.isScrollable = params.isScrollable ?? false;
-    this.isFocused = params.isFocused ?? false;
-    this.isEditable = params.isEditable ?? false;
-    this.isImage = params.isImage ?? false;
-    this.hintText = params.hintText ?? null;
-    this.error = params.error ?? null;
-    this.isSelected = params.isSelected ?? false;
-    this.children = params.children ?? [];
+    this.text = orDefault<string | null>(params.text, null);
+    this.accessibilityText = orDefault<string | null>(params.accessibilityText, null);
+    this.id = orDefault<string | null>(params.id, null);
+    this.clazz = orDefault<string | null>(params.clazz, null);
+    this.bounds = orDefault<[number, number, number, number] | null>(params.bounds, null);
+    this.isScrollable = orDefault(params.isScrollable, false);
+    this.isFocused = orDefault(params.isFocused, false);
+    this.isEditable = orDefault(params.isEditable, false);
+    this.isImage = orDefault(params.isImage, false);
+    this.hintText = orDefault<string | null>(params.hintText, null);
+    this.error = orDefault<string | null>(params.error, null);
+    this.isSelected = orDefault(params.isSelected, false);
+    this.children = orDefault(params.children, []);
   }
 
   /**
@@ -268,18 +278,22 @@ export class Hierarchy {
 
     const node = new HierarchyNode({
       index: startIndex,
-      text: (json['text'] as string) ?? null,
-      accessibilityText: (json['contentDesc'] as string) ?? (json['accessibilityText'] as string) ?? null,
-      id: (json['id'] as string) ?? null,
-      clazz: (json['class'] as string) ?? (json['clazz'] as string) ?? null,
+      text: Hierarchy._pick<string | null>(json, ['text'], null),
+      accessibilityText: Hierarchy._pick<string | null>(
+        json,
+        ['contentDesc', 'accessibilityText'],
+        null,
+      ),
+      id: Hierarchy._pick<string | null>(json, ['id'], null),
+      clazz: Hierarchy._pick<string | null>(json, ['class', 'clazz'], null),
       bounds,
-      isScrollable: (json['isScrollable'] as boolean) ?? false,
-      isFocused: (json['isFocused'] as boolean) ?? false,
-      isEditable: (json['isEditable'] as boolean) ?? false,
-      isImage: (json['isImage'] as boolean) ?? false,
-      hintText: (json['hintText'] as string) ?? null,
-      error: (json['error'] as string) ?? null,
-      isSelected: (json['isSelected'] as boolean) ?? false,
+      isScrollable: Hierarchy._pick(json, ['isScrollable'], false),
+      isFocused: Hierarchy._pick(json, ['isFocused'], false),
+      isEditable: Hierarchy._pick(json, ['isEditable'], false),
+      isImage: Hierarchy._pick(json, ['isImage'], false),
+      hintText: Hierarchy._pick<string | null>(json, ['hintText'], null),
+      error: Hierarchy._pick<string | null>(json, ['error'], null),
+      isSelected: Hierarchy._pick(json, ['isSelected'], false),
       children: parsedChildren,
     });
 
@@ -303,64 +317,82 @@ export class Hierarchy {
     json: Record<string, unknown>,
     index: number,
   ): HierarchyNode {
-    let id =
-      (json['id'] as string) ??
-      (json['identifier'] as string) ??
-      null;
+    // id is not a pure alias chain: an Android resource id containing ':id/'
+    // is reduced to its last segment after the alias lookup.
+    let id = Hierarchy._pick<string | null>(json, ['id', 'identifier'], null);
     if (id && id.includes(':id/')) {
       id = id.split(':id/').at(-1) ?? id;
     }
 
-    const clazz =
-      (json['class'] as string) ??
-      (json['clazz'] as string) ??
-      null;
+    const clazz = Hierarchy._pick<string | null>(json, ['class', 'clazz'], null);
 
     return new HierarchyNode({
       index,
-      text:
-        (json['text'] as string) ??
-        (json['title'] as string) ??
-        (json['value'] as string) ??
+      text: Hierarchy._pick<string | null>(json, ['text', 'title', 'value'], null),
+      accessibilityText: Hierarchy._pick<string | null>(
+        json,
+        ['content_desc', 'contentDesc', 'accessibilityText', 'label'],
         null,
-      accessibilityText:
-        (json['content_desc'] as string) ??
-        (json['contentDesc'] as string) ??
-        (json['accessibilityText'] as string) ??
-        (json['label'] as string) ??
-        null,
+      ),
       id,
       clazz,
       bounds: Hierarchy._parseBounds(json['bounds']),
-      isScrollable:
-        (json['isScrollable'] as boolean) ??
-        (json['is_scrollable'] as boolean) ??
-        false,
-      isFocused:
-        (json['isFocused'] as boolean) ??
-        (json['is_focused'] as boolean) ??
-        false,
-      isEditable:
-        (json['isEditable'] as boolean) ??
-        (json['is_editable'] as boolean) ??
-        false,
-      isImage: (
-        (json['isImage'] as boolean) ??
-        false
-      ) || (
-        (clazz?.includes('ImageView') ?? false) ||
-        (clazz?.includes('ImageButton') ?? false) ||
-        (clazz?.includes('SvgView') ?? false)
-      ),
-      hintText: (json['hintText'] as string) ?? null,
-      error: (json['error'] as string) ?? null,
-      isSelected:
-        (json['isSelected'] as boolean) ??
-        (json['is_selected'] as boolean) ??
-        (json['is_checked'] as boolean) ??
-        false,
+      isScrollable: Hierarchy._pick(json, ['isScrollable', 'is_scrollable'], false),
+      isFocused: Hierarchy._pick(json, ['isFocused', 'is_focused'], false),
+      isEditable: Hierarchy._pick(json, ['isEditable', 'is_editable'], false),
+      isImage: Hierarchy._isImageNode(json, clazz),
+      hintText: Hierarchy._pick<string | null>(json, ['hintText'], null),
+      error: Hierarchy._pick<string | null>(json, ['error'], null),
+      isSelected: Hierarchy._pick(json, ['isSelected', 'is_selected', 'is_checked'], false),
       children: [],
     });
+  }
+
+  /**
+   * isImage is NOT a pure alias chain: the explicit isImage flag is combined
+   * (with truthiness `||`, matching the original expression) with a check for
+   * image-like widget class names.
+   */
+  private static _isImageNode(
+    json: Record<string, unknown>,
+    clazz: string | null,
+  ): boolean {
+    return (
+      Hierarchy._pick(json, ['isImage'], false) ||
+      (clazz?.includes('ImageView') ?? false) ||
+      (clazz?.includes('ImageButton') ?? false) ||
+      (clazz?.includes('SvgView') ?? false)
+    );
+  }
+
+  /**
+   * First-present-key-wins lookup over a JSON record — the function form of
+   * the `??` alias chains this file used to repeat per field.
+   *
+   * Preserves `??` semantics EXACTLY: a key is "present" when its value is not
+   * null/undefined, so falsy-but-present values (`''`, `false`, `0`) win their
+   * spot in the chain. This must never become a truthiness check —
+   * `isScrollable: false` and `text: ''` in the payload are kept, not replaced
+   * by a later alias or the fallback.
+   *
+   * NOTE (deliberate, matches the original chains byte-for-byte in behaviour):
+   * the value is returned through a lying `as T` cast with no runtime type
+   * validation — e.g. a number-valued `text` comes back typed as string. Same
+   * defect class as SimctlClient._trimmed (fixed in #164); fixing it here
+   * would change behaviour on malformed payloads and is deferred as follow-up.
+   */
+  private static _pick<T>(
+    json: Record<string, unknown>,
+    keys: readonly string[],
+    fallback: T,
+  ): T {
+    for (const key of keys) {
+      const value = json[key];
+      if (value !== null && value !== undefined) {
+        return value as T;
+      }
+    }
+    return fallback;
   }
 
   private static _parseBounds(

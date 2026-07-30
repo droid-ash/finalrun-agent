@@ -383,6 +383,19 @@ export async function resolveEnvironmentFile(
     };
   }
 
+  return selectDefaultEnvironmentFile(envDir, environmentFiles, availableEnvNames);
+}
+
+/**
+ * Pick the environment when no name was requested: empty bindings when no env
+ * files exist, `dev` when present, the sole file when there is exactly one,
+ * and an actionable error when the choice is ambiguous.
+ */
+function selectDefaultEnvironmentFile(
+  envDir: string,
+  environmentFiles: Array<{ envName: string; envPath: string }>,
+  availableEnvNames: string[],
+): ResolvedEnvironmentFile {
   if (environmentFiles.length === 0) {
     return {
       envName: 'none',
