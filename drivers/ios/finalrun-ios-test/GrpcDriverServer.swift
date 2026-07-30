@@ -98,13 +98,68 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     private let viewHierarchyManager: XCViewHierarchyManager
     // AtomicFlag is Sendable, so it can be safely accessed from nonisolated functions
     private let isStreaming = AtomicFlag(false)
-    
+
+    /// JPEG quality used when a screenshot request omits `quality`.
+    ///
+    /// 5 is the value every live participant in this contract already uses: the
+    /// TypeScript client sends `quality ?? 5` at all three screenshot call
+    /// sites (packages/device-node/src/grpc/GrpcDriverClient.ts), the Android
+    /// driver uses 5, and driver.proto documents `Default: 5` on all four
+    /// screenshot request messages. Do NOT raise this to 10 "to match the Dart
+    /// default": there is no Dart code in this repository, so that claim cannot
+    /// be checked against anything, and every live consumer contradicts it.
+    ///
+    /// `nonisolated` because both readers — `getScreenshot` and
+    /// `getRawScreenshot` — are `nonisolated func`s while the enclosing class is
+    /// `@MainActor`. An immutable `Sendable` static is safe to read from any
+    /// isolation, so this only states what is already true, and it states it in
+    /// a way this target's SWIFT_VERSION 6.0 strict concurrency checking cannot
+    /// read differently.
+    private nonisolated static let defaultScreenshotQuality = 5
+
+    /// Accepted range for a `StartStreaming` fps, and the range every requested
+    /// fps is clamped into before it is used as a divisor.
+    ///
+    /// The clamp is not cosmetic: `startStreaming` computes
+    /// `UInt64(1_000_000_000 / fps)`, so `fps == 0` divides by zero and a
+    /// negative fps converts a negative Int to UInt64 — in Swift both are traps,
+    /// not errors, and a trap here kills the XCUITest runner hosting the driver.
+    /// Bounds match XCViewHierarchyManager's `streamingFpsRange` and Android's
+    /// `TestUtils.calculateFrameDelay` (`coerceIn(1, 60)`), so all three
+    /// streaming paths accept the same range.
+    private nonisolated static let streamingFpsRange = 1...60
+
+    /// fps used when a `StartStreaming` request omits the field.
+    ///
+    /// 24 — driver.proto's documented default for this RPC, and the value this
+    /// handler has always used. Deliberately NOT XCViewHierarchyManager's
+    /// `defaultStreamingFps` of 1: that constant defaults the legacy WebSocket
+    /// timer path, and aligning the two would change this RPC's behaviour rather
+    /// than just guard its arithmetic.
+    private nonisolated static let defaultStreamingFps = 24
+
     init(testManager: XCTestManager, viewHierarchyManager: XCViewHierarchyManager) {
         self.testManager = testManager
         self.viewHierarchyManager = viewHierarchyManager
         os_log("DriverServiceImpl: Initialized", log: serverLogger, type: .error)
     }
     
+    /// Response for an RPC this driver does not implement.
+    ///
+    /// Returning `success = true` from a handler that does nothing is worse
+    /// than returning an error: the caller cannot tell "done" from "silently
+    /// ignored", so a test passes having never performed the step. The Android
+    /// driver answers its own unimplemented actions the same way — false plus a
+    /// message naming the action (see DriverServiceImpl.copyText / pasteText /
+    /// hideKeyboard) — and so does `back` below.
+    private nonisolated func unsupportedOnIOS(_ action: String) -> FRActionResponse {
+        var response = FRActionResponse()
+        response.success = false
+        response.message = "\(action) not supported on iOS"
+        logRpc(action, success: false)
+        return response
+    }
+
     /// Helper to log RPC request/response
     private nonisolated func logRpc(_ method: String, params: String = "", success: Bool? = nil) {
         if let success = success {
@@ -176,15 +231,11 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     }
     
     nonisolated func copyText(request: FRCopyTextRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
-        var response = FRActionResponse()
-        response.success = true
-        return response
+        return unsupportedOnIOS("CopyText")
     }
     
     nonisolated func pasteText(request: FRPasteTextRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
-        var response = FRActionResponse()
-        response.success = true
-        return response
+        return unsupportedOnIOS("PasteText")
     }
     
     nonisolated func back(request: FRBackRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
@@ -264,9 +315,7 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
 
     
     nonisolated func hideKeyboard(request: FRHideKeyboardRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
-        var response = FRActionResponse()
-        response.success = true
-        return response
+        return unsupportedOnIOS("HideKeyboard")
     }
     
     nonisolated func pressKey(request: FRPressKeyRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
@@ -411,8 +460,13 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     }
     
     nonisolated func getAppList(request: FRGetAppListRequest, context: GRPCCore.ServerContext) async throws -> FRAppListResponse {
+        // Same contract as unsupportedOnIOS, but this RPC returns an
+        // FRAppListResponse: an empty `apps` list with success = true is
+        // indistinguishable from a device with no apps installed.
         var response = FRAppListResponse()
-        response.success = true
+        response.success = false
+        response.message = "GetAppList not supported on iOS"
+        logRpc("GetAppList", success: false)
         return response
     }
     
@@ -454,15 +508,13 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     }
     
     nonisolated func setLocation(request: FRSetLocationRequest, context: GRPCCore.ServerContext) async throws -> FRActionResponse {
-        var response = FRActionResponse()
-        response.success = true
-        return response
+        return unsupportedOnIOS("SetLocation")
     }
     
     // MARK: - Screenshot and Hierarchy
     
     nonisolated func getScreenshot(request: FRGetScreenshotRequest, context: GRPCCore.ServerContext) async throws -> FRScreenshotResponse {
-        let quality = request.hasQuality ? Int(request.quality) : 10  // Match Dart default
+        let quality = request.hasQuality ? Int(request.quality) : Self.defaultScreenshotQuality
         
         let result = await MainActor.run { () -> (screenshot: String, screenSize: CGSize)? in
             // Use getForegroundApp for consistency
@@ -498,7 +550,7 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     /// - Reduces gRPC transfer size by ~33%
     /// - Eliminates base64 decoding on client (~30-50ms per screenshot)
     nonisolated func getRawScreenshot(request: FRGetRawScreenshotRequest, context: GRPCCore.ServerContext) async throws -> FRRawScreenshotResponse {
-        let quality = request.hasQuality ? Int(request.quality) : 10  // Match Dart default
+        let quality = request.hasQuality ? Int(request.quality) : Self.defaultScreenshotQuality
         
         let result = await MainActor.run { () -> (jpegData: Data, screenSize: CGSize)? in
             // Use getForegroundApp for consistency with other screenshot methods
@@ -603,8 +655,20 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
         response: GRPCCore.RPCWriter<FRStreamFrame>,
         context: GRPCCore.ServerContext
     ) async throws {
-        let fps = request.hasFps ? Int(request.fps) : 24
-        let quality = request.hasQuality ? Int(request.quality) : 5
+        // The requested fps MUST be clamped before it is used as a divisor. An
+        // unclamped `request.fps` is attacker- or bug-supplied Int32: 0 makes
+        // `1_000_000_000 / fps` an integer division by zero and a negative value
+        // makes `UInt64(...)` a negative-to-unsigned conversion — both TRAP in
+        // Swift, which terminates the XCUITest runner and takes the whole driver
+        // with it. Clamping is the same protection XCViewHierarchyManager's
+        // legacy timer path applies (`streamingFpsRange`), and the same range
+        // Android's TestUtils.calculateFrameDelay coerces to.
+        let requestedFps = request.hasFps ? Int(request.fps) : Self.defaultStreamingFps
+        let fps = min(
+            max(requestedFps, Self.streamingFpsRange.lowerBound),
+            Self.streamingFpsRange.upperBound
+        )
+        let quality = request.hasQuality ? Int(request.quality) : Self.defaultScreenshotQuality
         let frameDelayNs = UInt64(1_000_000_000 / fps)
         
         os_log("gRPC: Starting streaming with fps=%d, quality=%d", log: serverLogger, type: .error, fps, quality)

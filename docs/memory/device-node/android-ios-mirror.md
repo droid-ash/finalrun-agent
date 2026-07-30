@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "The Android/iOS mirror in device-node — AdbClient/SimctlClient, the gRPC setups, the recording and log providers, the discovery probe family: sharing is settled per pair by a measured diff rather than parallel shape (`infra/commandFailure.ts`, the `MAX_DIAGNOSTIC_OUTPUT_CHUNKS` bound), child-process diagnostic buffers are bounded rings that exist only where a consumer reads them, `simctl` plist fields degrade per field, and per-platform policy keeps its own path."
+description: "The Android/iOS mirror in device-node — platform clients, gRPC setups, recording/log providers, discovery probes: sharing is settled per pair by a measured diff, not parallel shape (`infra/commandFailure.ts`, `device/logWriteStream.ts`, `MAX_DIAGNOSTIC_OUTPUT_CHUNKS`), diagnostic buffers are bounded rings with a consumer, `simctl` plist fields degrade per field, driver recovery replays only an explicit allow-list, and `closeDriverChannel` closes a channel rather than killing a process."
 ---
 # Android/iOS Mirror (device-node)
 
@@ -25,6 +25,8 @@ A helper appearing in both platform branches MUST NOT be lifted into shared code
 ### Requirement: A shared cross-platform module is a single-purpose, zero-import leaf at the common parent
 
 A module shared across the seam MUST sit at the nearest common parent directory of its call sites, export only the shared operation, import nothing, and stay out of the package barrel (`src/index.ts`). `src/infra/commandFailure.ts` is the shape: it exports `toCommandFailureResult` over a module-private stream-text extractor, sits at `infra/` — the common parent of `infra/android/` and `infra/ios/` — is imported by exactly the two clients, and is not part of the package's public API. It declares its own `CommandFailureResult` rather than either client's result type, so it depends on neither branch.
+
+`src/device/logWriteStream.ts` is the second instance and conforms the same way: one exported class (`LogWriteStreamRegistry`) for the log-file write-stream bookkeeping the two log providers share, at `device/` — the common parent of `AndroidLogcatProvider` and `IOSLogProvider` — imported by exactly those two, absent from the barrel, and importing nothing from either branch. The measured diff is what admits it: the two providers' versions of that bookkeeping differ only by a log-prefix string ([/device-node/log-capture.md](/device-node/log-capture.md)).
 
 #### Scenario: a proven-identical operation is placed
 
@@ -72,6 +74,122 @@ Accumulation is justified by a reader, and an accumulator without one is not add
 - **WHEN** `listInstalledApps` parses the records
 - **THEN** that app is enumerated with `version: null` and every other app in the listing is returned normally
 
+### Requirement: A compressed recording replaces the original by rename alone
+
+`IOSRecordingProvider._compressVideo` MUST rename the compressed file straight over the original and
+MUST NOT delete the original first. Both paths are in the same directory, where POSIX `rename()`
+replaces the destination atomically, so a preceding `rm` buys nothing — and a rename that fails
+after it leaves no copy of the recording anywhere. The `-crf` value is the named constant
+`COMPRESSION_CRF` (`'40'`, far above the visually-lossless ~18–23 range: a run's video is a
+diagnostic artifact uploaded per test, so size dominates fidelity), never a bare literal in the
+ffmpeg argument list.
+
+#### Scenario: the rename fails
+
+- **GIVEN** a compressed file and a `rename` that throws
+- **WHEN** `_compressVideo` returns
+- **THEN** the original recording still exists at its path
+
+#### Scenario: the compression succeeds
+
+- **GIVEN** a compression that completes
+- **WHEN** `_compressVideo` returns
+- **THEN** the original path holds the compressed video and no `-small` sibling remains
+
+### Requirement: Driver recovery replays only an explicit allow-list of operations
+
+`IOSSimulator._withDriverRecovery` restarts a dead driver on any operation, but MUST re-execute the
+failed operation only when its `opName` is a member of `REPLAYABLE_AFTER_DRIVER_RESTART` — six entries: the five
+read-only captures (`captureState`, `checkAppInForeground`, `getHierarchy`, `getScreenshot`,
+`getScreenshotAndHierarchy`) plus the idempotent driver-state sync `updateAppIds`, which a freshly
+restarted driver needs anyway because it has lost its app-id list, and which touches driver state
+only, never the device. Every device-touching operation is excluded — `tap`, `tapPercent`,
+`longPress`, `enterText`, `eraseText`, `scrollAbs`, `rotate`, `hideKeyboard`, `pressKey`,
+`launchApp` — and an operation not named in the set defaults to *not* replayed, so a device action
+added later is safe until someone deliberately opts it in. On the non-replayed path the driver is
+still restarted (so the *next* call can succeed), a warning names the operation, and the original
+error propagates.
+
+This **resolves** rather than contradicts `GrpcDriverClient._unaryCall`'s rationale for defaulting
+`maxRetries` to 0 "to prevent duplicating mutating actions": a driver can die *after* the request
+reached the device, so the two layers now state one rule, and `GrpcDriverClient`'s doc comment names
+the allow-list explicitly ("the read-only captures plus the idempotent `updateAppIds`") so neither
+layer can turn one requested mutation into two.
+
+#### Scenario: a tap fails and the driver has exited
+
+- **GIVEN** a `tap` whose call throws and a driver process that has exited
+- **WHEN** `_withDriverRecovery` handles it
+- **THEN** the driver is restarted, `fn` is called exactly once in total, and the original error propagates
+
+#### Scenario: a capture fails and the driver has exited
+
+- **GIVEN** a `getScreenshot` whose call throws and a driver process that has exited
+- **WHEN** `_withDriverRecovery` handles it
+- **THEN** the driver is restarted and the capture is retried once
+
+#### Scenario: an unclassified operation fails
+
+- **GIVEN** an `opName` absent from `REPLAYABLE_AFTER_DRIVER_RESTART`
+- **WHEN** the driver is found dead
+- **THEN** it is not replayed — the default falls the safe way
+
+### Requirement: A method that closes a channel is named for closing a channel
+
+`CommonDriverActions` exposes `close()` and `closeDriverChannel()`, byte-identical bodies that close
+this client's gRPC channel and nothing else: the on-device driver — the Android instrumentation host
+or the XCUITest runner — keeps running, and ending that process is the platform runtime's job
+(`IOSSimulator.close` terminates the runner bundle via simctl). Both MUST document that, so the next
+reader neither collapses two identical bodies nor trusts a name that promises a process kill.
+
+The public interface name `killDriver()` is **retained** on `DeviceAgent`, `DeviceRuntime` and the
+`Device` facade — renaming it would ripple through `@finalrun/common`, goal-executor and four test
+stubs — and is instead documented at every one of those declarations, plus both platform
+implementations (`AndroidDevice`, `IOSSimulator`), as closing the driver channel rather than killing
+a process. Every one of those implementations delegates to `CommonDriverActions.closeDriverChannel()`.
+
+#### Scenario: a reader looks for the method that terminates the driver process
+
+- **GIVEN** `CommonDriverActions` and the interfaces declaring `killDriver()`
+- **WHEN** a reader looks for a method that terminates the driver process
+- **THEN** none claims to, and every channel-closing declaration says what it closes
+
+### Requirement: A registered disconnection handler is actually invoked, and cannot break the action's response
+
+`Device._disconnectionCallback`, registered by `listenForDeviceDisconnection`, MUST be invoked when
+`Device` observes a lost connection: an action that threw while `runtime.isConnected()` reports
+`false`. That is the only disconnection signal `Device` receives — nothing in the stack emits a
+disconnection event to subscribe to. The handler receives the device UUID and a reason, and is
+notified **at most once per registration** (a single dead connection otherwise produces one callback
+per subsequent failing action); registering again re-arms it, and `clearListener()` clears both the
+handler and the armed flag.
+
+The notify path runs inside `executeAction`'s `catch`, so it MUST NOT throw. Both remaining steps
+run foreign code — the runtime's `isConnected()` and the caller-supplied handler — and both are
+inside the guard, because an exception escaping would make `executeAction` **reject** instead of
+returning the `Action failed: …` response its contract promises, replacing the original action error
+with an unrelated one. The one-shot flag is set *before* the handler call, so a throwing handler is
+still not called again by the next failing action. **The notification is best-effort; the action's
+own reported outcome is not.**
+
+#### Scenario: an action fails while the runtime reports not-connected
+
+- **GIVEN** a registered `onDeviceDisconnected` handler and a runtime whose action throws while reporting not-connected
+- **WHEN** `executeAction` handles the failure
+- **THEN** the handler is invoked once with the device UUID and a reason naming the failure, and the action still returns its failure response
+
+#### Scenario: a second action fails on the same dead connection
+
+- **GIVEN** the same handler and a second failing action
+- **WHEN** `executeAction` handles it
+- **THEN** the handler is not invoked again
+
+#### Scenario: the registered handler throws
+
+- **GIVEN** a handler that throws
+- **WHEN** it is notified
+- **THEN** the throw is logged, `executeAction` still returns `{ success: false, message: 'Action failed: …' }` carrying the original error, and the handler is not retried
+
 ## Design Decisions
 
 ### Measured identity, not parallel shape, decides what the mirror shares
@@ -103,6 +221,88 @@ Accumulation is justified by a reader, and an accumulator without one is not add
 **Rejected**: (a) a shared `pushBounded(buffer, chunk)` push helper — the diff is measured at accumulator-body granularity and is non-empty, so extracting it would be sharing on parallel shape; (b) duplicating the literal `20` at both sites — a magic number twice over, with the retention policy written nowhere; (c) putting the constant in an existing `device/` or `discovery/` module or exporting it from the barrel — both directories sit below the call sites' common parent, so one branch would import from the other's tree, and the bound is an internal detail of two callers rather than package API; (d) reading the two sites as unrelated because they are not a platform pair — the duplication and the test that settles it are the same either way.
 
 *Introduced by*: 260728-o3me-fix-deferred-error-path-defects
+
+### Replay after a driver restart is opt-in per operation, keyed on the name the call sites already pass
+
+**Decision**: `_withDriverRecovery` consults `REPLAYABLE_AFTER_DRIVER_RESTART`, a module-level set of
+operation names safe to replay (the read-only captures plus `updateAppIds`); everything else restarts
+the driver and rethrows. An unlisted name defaults to *not* replayed.
+
+**Why**: Every call site already passes `opName`, so the classification costs no new parameter and no
+call-site churn, and the default falls the safe way — a newly added mutating action is not replayed
+until someone deliberately lists it. `updateAppIds` is listed because a restarted driver has *lost*
+its app-id list, so replay is required for correctness, and it mutates driver state only, never the
+device. Stating the same rule in both layers' doc comments is what keeps them from drifting back into
+contradiction: the value of the retry policy is entirely in the two layers agreeing.
+
+**Rejected**: (a) disabling re-execution wholesale — smaller, but it also gives up recovery for the
+read-only captures, which is the case the mechanism was built for and where replay is observably
+harmless; (b) a `retryAfterRestart` boolean at each of the 16 call sites — the same information
+spread over 16 places to be kept consistent by hand; (c) parsing the gRPC error to decide — process
+state, not error text, is the source of truth for whether the driver died.
+
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### An atomic rename needs no `rm`, and the `rm` is the part that can lose data
+
+**Decision**: `_compressVideo` renames the compressed file over the original with no preceding
+deletion.
+
+**Why**: A same-directory POSIX `rename()` replaces the destination atomically, so deleting first
+changes nothing about the outcome on the success path — while on the failure path it is the whole
+difference between "compression failed, the recording is still there" and "the recording is gone".
+The deletion reads as tidy-up, which is why it survives review: its cost is only visible on a path
+nobody exercises.
+
+**Rejected**: (a) keeping the `rm` and wrapping the rename in a retry — retries a step that cannot
+recover the deleted file; (b) copying the original aside before deleting it — reintroduces a
+temp-file lifetime to manage in order to restore a guarantee `rename` already gives for free.
+
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### A misleading name is corrected inside the package and documented at every public declaration
+
+**Decision**: The channel-closing method inside `device-node` is named `closeDriverChannel`. The
+`killDriver()` name on `DeviceAgent`, `DeviceRuntime`, `Device` and the two platform runtimes is kept,
+and each of those five declarations carries a doc comment saying the call closes a channel and leaves
+the driver process running.
+
+**Why**: The accurate name earns its keep where the implementation is read, and inside `device-node`
+that costs two call sites. Carrying it to the public interface would ripple through
+`@finalrun/common`, goal-executor and four test stubs in a change whose contract is "no runtime
+behaviour changes" — a bigger diff for the same reader benefit a doc comment delivers at the
+declaration. Documenting *every* retained declaration rather than only the two platform
+implementations matters because a reader arriving at the interface sees only `killDriver()`.
+
+**Rejected**: (a) renaming the public interface method too — a cross-package rename inside a
+no-behaviour-change fix; (b) collapsing `close()` and `closeDriverChannel()` into one method — the
+public `killDriver()` chain still needs a target, and collapsing them is the exact move the two
+doc comments exist to stop happening by accident; (c) leaving the internal name as `killDriver` and
+documenting only — the implementation is where a name promising a process kill does its damage, and
+there it is free to correct.
+
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### A callback invoked from a `catch` is guarded end to end, and armed before it is called
+
+**Decision**: `Device._notifyIfDisconnected` wraps both the runtime's `isConnected()` probe and the
+caller-supplied handler in its own try/catch, logs anything they throw, and sets its one-shot flag
+before calling the handler.
+
+**Why**: It runs inside `executeAction`'s `catch`, which owes its caller a
+`{ success: false, message: 'Action failed: …' }` response carrying the *original* error. An escaping
+exception converts that into a rejection and substitutes an unrelated error — a strictly worse
+outcome than a missed notification, so the notification is the part that gets to be best-effort.
+Arming before the call keeps a throwing handler from being retried on every subsequent failing
+action, which is the same storm the one-shot exists to prevent.
+
+**Rejected**: (a) guarding only the handler — `isConnected()` is a runtime implementation the
+`Device` does not own and can throw for its own reasons; (b) letting a handler's exception propagate
+so the caller "sees" it — the caller asked about an action, and the error it would receive is not
+about that action; (c) arming after a successful handler call — a handler that throws every time is
+then called on every failure.
+
+*Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
 
 ### A malformed plist field degrades to its fallback rather than raising a better error
 

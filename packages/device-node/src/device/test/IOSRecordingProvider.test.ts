@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -102,4 +102,73 @@ test('IOSRecordingProvider availability reports simctl support and optional ffmp
     { file: 'xcrun', args: ['simctl', 'help'] },
     { file: 'which', args: ['ffmpeg'] },
   ]);
+});
+
+test('IOSRecordingProvider keeps the original recording when the compressed rename fails', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'finalrun-ios-recording-'));
+  const recordingPath = path.join(tempDir, 'run_case.mov');
+  await writeFile(recordingPath, 'original-recording');
+
+  // A directory at the compressed path passes the provider's access() check and
+  // then makes rename() fail — the shape that used to destroy the recording,
+  // because the original was deleted before the rename was attempted.
+  const compressedPath = path.join(tempDir, 'run_case-small.mov');
+  await mkdir(compressedPath);
+
+  const process = new FakeChildProcess();
+  const provider = new IOSRecordingProvider({
+    execFileFn: async () => ({ stdout: '/usr/bin/mock', stderr: '' }),
+  });
+
+  const response = await provider.stopRecordingProcess({
+    process: process as unknown as ChildProcess,
+    deviceId: 'SIM-1',
+    fileName: 'run_case',
+    filePath: recordingPath,
+  });
+
+  assert.equal(response.success, true);
+  assert.equal(
+    await readFile(recordingPath, 'utf8'),
+    'original-recording',
+    'a failed rename must leave the original recording in place',
+  );
+});
+
+test('IOSRecordingProvider replaces the original with the compressed recording on success', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'finalrun-ios-recording-'));
+  const recordingPath = path.join(tempDir, 'run_case.mov');
+  const compressedPath = path.join(tempDir, 'run_case-small.mov');
+  await writeFile(recordingPath, 'original-recording');
+
+  const process = new FakeChildProcess();
+  const provider = new IOSRecordingProvider({
+    execFileFn: async (file, args) => {
+      if (file === 'ffmpeg') {
+        assert.deepEqual(args, [
+          '-y',
+          '-i',
+          recordingPath,
+          '-c:v',
+          'libx264',
+          '-crf',
+          '40',
+          compressedPath,
+        ]);
+        await writeFile(compressedPath, 'compressed');
+      }
+      return { stdout: '/usr/bin/mock', stderr: '' };
+    },
+  });
+
+  const response = await provider.stopRecordingProcess({
+    process: process as unknown as ChildProcess,
+    deviceId: 'SIM-1',
+    fileName: 'run_case',
+    filePath: recordingPath,
+  });
+
+  assert.equal(response.success, true);
+  assert.equal(await readFile(recordingPath, 'utf8'), 'compressed');
+  await assert.rejects(() => stat(compressedPath), /ENOENT/);
 });

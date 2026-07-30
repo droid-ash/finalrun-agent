@@ -1,0 +1,15 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-30T06:56:36Z"}
+{"args":"Add a CI compile gate for drivers/ (Kotlin + Swift), then fix ~20 confirmed defects found during a repo-wide 234-file comment-quality audit against the javascript.info/comments 9-point rubric. Excludes dead-code deletion, the comment sweep, policy encoding, and packages/report-web.","cmd":"fab-new","event":"command","ts":"2026-07-30T06:56:36Z"}
+{"delta":"+0.0","event":"confidence","score":4.1,"trigger":"calc-score","ts":"2026-07-30T08:21:41Z"}
+{"delta":"-0.1","event":"confidence","score":4,"trigger":"calc-score","ts":"2026-07-30T08:22:06Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-30T08:30:39Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-30T09:06:25Z"}
+{"event":"review","result":"failed","ts":"2026-07-30T09:27:59Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-30T09:27:59Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-30T09:42:51Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-30T09:57:47Z"}
+{"event":"review","result":"passed","ts":"2026-07-30T09:57:47Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-30T09:58:58Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-30T10:13:50Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-30T10:17:21Z"}
+{"event":"review","result":"passed","ts":"2026-07-30T10:43:12Z"}

@@ -1,0 +1,5 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-30T05:37:44Z"}
+{"args":"Add CI compile gate for drivers/ (no workflow builds Kotlin/Swift today) and fix ~20 confirmed defects surfaced by a 234-file comment-quality audit: cross-language proto contract divergences (tapPercent 100x, quality default, missing reserved 4, Swipe UNIMPLEMENTED, iOS fabricated success), and runtime bugs across device-node, cli, cloud-core, and both native drivers.","cmd":"fab-new","event":"command","ts":"2026-07-30T05:37:44Z"}
+{"delta":"+0.8","event":"confidence","score":0.8,"trigger":"calc-score","ts":"2026-07-30T05:41:15Z"}
+{"delta":"+0.8","event":"confidence","score":1.6,"trigger":"calc-score","ts":"2026-07-30T05:42:53Z"}
+{"delta":"-1.6","event":"confidence","score":0,"trigger":"calc-score","ts":"2026-07-30T06:23:21Z"}

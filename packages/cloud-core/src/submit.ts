@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import AdmZip from 'adm-zip';
 import { Logger } from '@finalrun/common';
 import { prepareAppForUpload, type PreparedApp } from './appBundle.js';
+import { parseTimeoutMsFromEnv } from './timeoutEnv.js';
 
 // Minimal projection of the CLI's CheckRunnerResult needed by submission.
 // Cloud-core does not depend on the CLI's check pipeline; the orchestrator
@@ -54,22 +55,7 @@ export interface SubmitRunResult {
 // Generous timeout to accommodate large APK/IPA uploads on slow uplinks while
 // still catching genuinely stalled connections. Override with
 // FINALRUN_SUBMIT_TIMEOUT_MS for ultra-large uploads or low-bandwidth tests.
-const SUBMIT_TIMEOUT_MS = parseSubmitTimeoutMs(30 * 60 * 1000);
-
-function parseSubmitTimeoutMs(defaultMs: number): number {
-  const raw = process.env['FINALRUN_SUBMIT_TIMEOUT_MS'];
-  if (raw === undefined || raw === '') return defaultMs;
-  const parsed = Number(raw);
-  // Number.isInteger tests the parsed VALUE (it also rejects NaN/±Infinity),
-  // so integral spellings like '1e3' or '0x10' stay accepted while
-  // fractional values are rejected — matching the message's promise.
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(
-      `Invalid FINALRUN_SUBMIT_TIMEOUT_MS=${JSON.stringify(raw)}: must be a positive integer (milliseconds).`,
-    );
-  }
-  return parsed;
-}
+const SUBMIT_TIMEOUT_MS = parseTimeoutMsFromEnv('FINALRUN_SUBMIT_TIMEOUT_MS', 30 * 60 * 1000);
 
 type AppMode = { type: 'file'; prepared: PreparedApp } | { type: 'server-default' };
 

@@ -666,3 +666,43 @@ test('the module throws at load time when FINALRUN_SUBMIT_TIMEOUT_MS is invalid'
     delete require.cache[modulePath];
   }
 });
+
+test('the upload module throws at load time when FINALRUN_UPLOAD_TIMEOUT_MS is invalid', () => {
+  // Same seam as the FINALRUN_SUBMIT_TIMEOUT_MS test above: UPLOAD_TIMEOUT_MS is
+  // a module-level const, so the validation throw is only reachable by
+  // re-evaluating the module through the require cache. Both variables now go
+  // through one shared parser (src/timeoutEnv.ts), so this pins the half that
+  // used to accept a fractional millisecond while its own message said it could
+  // not.
+  const original = process.env['FINALRUN_UPLOAD_TIMEOUT_MS'];
+  const modulePath = require.resolve('../upload.js');
+  const reload = (): void => {
+    delete require.cache[modulePath];
+    require(modulePath);
+  };
+  try {
+    for (const invalid of ['not-a-number', '0', '-5000', '1.5']) {
+      process.env['FINALRUN_UPLOAD_TIMEOUT_MS'] = invalid;
+      assert.throws(reload, /Invalid FINALRUN_UPLOAD_TIMEOUT_MS/, `expected throw for "${invalid}"`);
+    }
+    // The accepted set pins the other direction of the narrowing: the guard
+    // tests the parsed VALUE, so exponent and hex spellings of integers work.
+    for (const valid of ['60000', '1e3', '0x10']) {
+      process.env['FINALRUN_UPLOAD_TIMEOUT_MS'] = valid;
+      assert.doesNotThrow(reload, `expected "${valid}" to be accepted`);
+    }
+    process.env['FINALRUN_UPLOAD_TIMEOUT_MS'] = '1.5';
+    assert.throws(
+      reload,
+      /Invalid FINALRUN_UPLOAD_TIMEOUT_MS="1\.5": must be a positive integer \(milliseconds\)\./,
+      'the message is the contract, verbatim',
+    );
+  } finally {
+    if (original === undefined) {
+      delete process.env['FINALRUN_UPLOAD_TIMEOUT_MS'];
+    } else {
+      process.env['FINALRUN_UPLOAD_TIMEOUT_MS'] = original;
+    }
+    delete require.cache[modulePath];
+  }
+});

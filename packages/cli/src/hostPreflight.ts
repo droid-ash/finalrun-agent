@@ -57,22 +57,58 @@ export interface HostPreflightDependencies {
   checkIOSRecordingAvailability(): Promise<DeviceNodeResponse>;
 }
 
+/** POSIX command locator. */
+const POSIX_COMMAND_LOCATOR = 'which';
+/** Windows has no `which`; `where` is its equivalent. */
+const WINDOWS_COMMAND_LOCATOR = 'where';
+
+/**
+ * Resolves `command` to an absolute path, or `null` when it is not on PATH.
+ *
+ * Branches on the platform because `which` does not exist on Windows: shelling
+ * to it unconditionally makes *every* `checkCommandOnPath` result on a Windows
+ * host a false negative — the command is reported missing whether or not it is
+ * installed. Same `win32` branch shape as `upgradeCommand.ts` and
+ * `reportServerManager.ts`, which already handle Windows this way.
+ *
+ * `where` can print several matches, one per line; the first is what the shell
+ * would run, so only that line is taken (`which` prints a single line, so the
+ * same split is a no-op there).
+ *
+ * The `overrides` are defaulted process boundaries — the child-process runner,
+ * the platform, and the existence check — so the branch is reachable by a test
+ * without stubbing globals.
+ */
+export async function resolveCommandPath(
+  command: string,
+  overrides?: {
+    platform?: NodeJS.Platform;
+    execFile?: HostPreflightDependencies['execFile'];
+    access?: (candidatePath: string) => Promise<void>;
+  },
+): Promise<string | null> {
+  const platform = overrides?.platform ?? process.platform;
+  const execFileFn = overrides?.execFile ?? execFileAsync;
+  const accessFn = overrides?.access ?? ((candidatePath: string) => fs.access(candidatePath));
+  const locator = platform === 'win32' ? WINDOWS_COMMAND_LOCATOR : POSIX_COMMAND_LOCATOR;
+
+  try {
+    const { stdout } = await execFileFn(locator, [command]);
+    const resolvedPath = stdout.toString().split(/\r?\n/)[0]?.trim();
+    if (!resolvedPath) {
+      return null;
+    }
+    await accessFn(resolvedPath);
+    return resolvedPath;
+  } catch {
+    return null;
+  }
+}
+
 export const hostPreflightDependencies: HostPreflightDependencies = {
   createFilePathUtil: () => new CliFilePathUtil(undefined, undefined, { downloadAssets: false }),
   execFile: execFileAsync,
-  resolveCommand: async (command) => {
-    try {
-      const { stdout } = await execFileAsync('which', [command]);
-      const resolvedPath = stdout.toString().trim();
-      if (!resolvedPath) {
-        return null;
-      }
-      await fs.access(resolvedPath);
-      return resolvedPath;
-    } catch {
-      return null;
-    }
-  },
+  resolveCommand: async (command) => await resolveCommandPath(command),
   pathExists: async (candidatePath) => {
     try {
       await fs.access(candidatePath);

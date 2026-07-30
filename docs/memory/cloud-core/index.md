@@ -7,4 +7,4 @@ description: "Cloud submission from packages/cloud-core — the submit pipeline'
 
 | File | Description |
 |------|-------------|
-| [submit-pipeline](submit-pipeline.md) | submit.ts + appBundle.ts — the FINALRUN_SUBMIT_TIMEOUT_MS contract (a positive integer *value*, so `1e3` and `0x10` are accepted and `1.5` is rejected, with no string-format regex) and the temp-zip lifecycle: adm-zip's `writeZip` is not atomic, so `zipAppBundle`'s cleanup scope opens before the call, and the success path hands ownership to the caller under the `isTempZip` contract |
+| [submit-pipeline](submit-pipeline.md) | submit.ts + upload.ts + appBundle.ts — the millisecond-timeout env contract, stated once in the shared `timeoutEnv.ts` parser both submit and upload call (a positive integer *value*, so `1e3` and `0x10` are accepted and `1.5` is rejected, with no string-format regex) and the temp-zip lifecycle: adm-zip's `writeZip` is not atomic, so `zipAppBundle`'s cleanup scope opens before the call, and the success path hands ownership to the caller under the `isTempZip` contract |

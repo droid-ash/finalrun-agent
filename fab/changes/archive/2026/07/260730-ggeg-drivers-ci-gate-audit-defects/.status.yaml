@@ -1,0 +1,36 @@
+id: ggeg
+name: 260730-ggeg-drivers-ci-gate-audit-defects
+created: 2026-07-30T05:37:44Z
+created_by: droid-ash
+change_type: fix
+issues: []
+progress:
+    intake: ready
+    apply: pending
+    review: pending
+    hydrate: pending
+    ship: pending
+    review-pr: pending
+plan:
+    generated: false
+    task_count: 0
+    acceptance_count: 0
+    acceptance_completed: 0
+confidence:
+    certain: 7
+    confident: 13
+    tentative: 2
+    unresolved: 0
+    score: 0.0
+    fuzzy: true
+    dimensions:
+        signal: 64.8
+        reversibility: 75.9
+        competence: 61.1
+        disambiguation: 74.1
+stage_metrics:
+    intake: {started_at: "2026-07-30T05:37:44Z", driver: fab-new, iterations: 1}
+prs: []
+change_type_source: explicit
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-30T06:23:21Z

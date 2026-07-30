@@ -236,11 +236,27 @@ export class CommonDriverActions {
     return await this._grpcClient.updateAppIds(appIds);
   }
 
+  /**
+   * Closes this client's gRPC channel. The on-device driver — the Android
+   * instrumentation host or the XCUITest runner — keeps running; ending its
+   * process is the platform runtime's job (`IOSSimulator.close` terminates the
+   * runner bundle via simctl), not this class's.
+   */
   close(): void {
     this._grpcClient.close();
   }
 
-  killDriver(): void {
+  /**
+   * Also closes the gRPC channel — identical to {@link close}, and named for
+   * what it does rather than what its caller is called.
+   *
+   * It was `killDriver`, which claimed to terminate the driver process and did
+   * not: two identical bodies under two different names invite the next reader
+   * either to collapse them or to trust the name. Both readings are wrong. The
+   * public `killDriver()` on `DeviceAgent` / `DeviceRuntime` still delegates
+   * here, so calling it does not kill a driver either.
+   */
+  closeDriverChannel(): void {
     this._grpcClient.close();
   }
 

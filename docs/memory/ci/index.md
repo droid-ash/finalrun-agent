@@ -1,5 +1,5 @@
 ---
-description: "PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out) and its enforcement — a completed verdict per push (no `concurrency` block) with the `test` check required to merge via ruleset 14531661 — plus the committed-lockfile reproducible-install contract shared with release.yml and the explicit-discovery test-runner contract for the Node-20.19 floor"
+description: "PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out) and its enforcement — a completed verdict per push (no `concurrency` block) with the `test` check required to merge via ruleset 14531661 — plus the additive compile-only drivers.yml gate for the native Kotlin/Swift drivers, the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor"
 ---
 # Ci Documentation
 
@@ -7,4 +7,4 @@ description: "PR quality gate (`npm ci` → build → typecheck → test → lin
 
 | File | Description |
 |------|-------------|
-| [pr-quality-gate](pr-quality-gate.md) | PR CI gate (`npm ci` → build → typecheck → test → lint, .github/workflows/ci.yml), enforced: every PR push gets its own completed verdict, `test` required to merge (ruleset 14531661, app-pinned); explicit typecheck scripts everywhere (`local-runtime`: no-op), no `--if-present` fan-outs; code-quality rules are ESLint warnings, test files exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first, proving equivalence. |
+| [pr-quality-gate](pr-quality-gate.md) | Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint), enforced with a completed verdict per push and `test` required to merge (ruleset 14531661); plus the additive compile-only drivers.yml gate for the Kotlin/Swift drivers. Explicit typecheck scripts, no `--if-present` fan-outs; code-quality rules are ESLint warnings, test files exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first. |

@@ -17,9 +17,10 @@ fkf_version: "0.1"
 
 | Domain | Description |
 |--------|-------------|
-| [ci](ci/index.md) | PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out) and its enforcement — a completed verdict per push (no `concurrency` block) with the `test` check required to merge via ruleset 14531661 — plus the committed-lockfile reproducible-install contract shared with release.yml and the explicit-discovery test-runner contract for the Node-20.19 floor |
-| [cli](cli/index.md) | CLI orchestration, report writing, HTML generation |
+| [ci](ci/index.md) | PR quality gate (`npm ci` → build → typecheck → test → lint, with no `--if-present` on any workspace fan-out) and its enforcement — a completed verdict per push (no `concurrency` block) with the `test` check required to merge via ruleset 14531661 — plus the additive compile-only drivers.yml gate for the native Kotlin/Swift drivers, the committed-lockfile reproducible-install contract shared with release.yml, and the explicit-discovery test-runner contract for the Node-20.19 floor |
+| [cli](cli/index.md) | CLI orchestration, report writing, HTML generation, and the host preflight environment checks |
 | [cloud-core](cloud-core/index.md) | Cloud submission from packages/cloud-core — the submit pipeline's environment contract and the temp-artifact lifecycle: what each step acquires, where each cleanup scope opens, and who owns release once a path is returned |
 | [common](common/index.md) | `packages/common` — the base of the dependency graph, imported by every other package: the UI-hierarchy parse contract that planner and grounder prompts are built from (two deliberately non-equivalent parse paths, presence-based alias resolution, two bounds forms, unvalidated field casts) |
 | [device-node](device-node/index.md) | Device interaction via gRPC: lifecycle, recording, log capture, and the Android/iOS mirror — what the two platform branches share and what stays per-platform |
+| [drivers](drivers/index.md) | The native on-device drivers under `drivers/` (Kotlin instrumentation host, Swift XCUITest runner) and the `proto/finalrun/driver.proto` gRPC contract they share with the TypeScript client: the unit and default conventions all three implementations must agree on, the per-platform divergences that are deliberate, and the compile-only verification ceiling native code ships under. |
 | [report-web](report-web/index.md) | Vite React report viewer SPA + importable UI library for test run results |

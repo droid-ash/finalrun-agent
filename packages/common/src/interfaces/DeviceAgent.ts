@@ -30,6 +30,12 @@ export interface DeviceAgent {
   closeConnection(): Promise<void>;
 
   // Dart: void killDriver()
+  /**
+   * Closes the gRPC channel to the on-device driver. It does **not** kill the
+   * driver process — the instrumentation host / XCUITest runner keeps running.
+   * The name predates this port and is retained for its callers; read it as
+   * "close the driver channel".
+   */
   killDriver(): void;
 
   // Dart: void setApiKey(String apiKey)

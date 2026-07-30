@@ -3,10 +3,13 @@ import test from 'node:test';
 import {
   AppUpload,
   DeviceAppInfo,
+  GetScreenshotAction,
   LaunchAppAction,
+  Point,
   PressKeyAction,
   ScrollAbsAction,
   SetLocationAction,
+  TapAction,
 } from '@finalrun/common';
 import type { GrpcDriverClient } from '../../../grpc/GrpcDriverClient.js';
 import type { IOSDriverProcessHandle } from '../../../infra/ios/SimctlClient.js';
@@ -579,4 +582,92 @@ test('IOSSimulator applies supported custom permissions through simctl before la
     'simctl:togglePermissions',
     'grpc:launch',
   ]);
+});
+
+/** Process handle reporting a dead driver, so recovery engages. */
+function deadDriverProcess(): IOSDriverProcessHandle {
+  return {
+    pid: 1234,
+    exitCode: 1,
+    killed: false,
+    stdout: null,
+    stderr: null,
+    on() { return this; },
+  } as unknown as IOSDriverProcessHandle;
+}
+
+test('IOSSimulator does not re-execute a mutating action after restarting a dead driver', async () => {
+  const tapCalls: Array<{ x: number; y: number }> = [];
+  let restarts = 0;
+  const grpcClient = {
+    isConnected: true,
+    async tap(request: { x: number; y: number }) {
+      tapCalls.push({ x: request.x, y: request.y });
+      throw new Error('driver channel closed');
+    },
+    close() {},
+  };
+
+  const runtime = new IOSSimulator({
+    commonDriverActions: new CommonDriverActions({
+      grpcClient: grpcClient as unknown as GrpcDriverClient,
+    }),
+    simctlClient: {} as never,
+    deviceId: 'SIM-1',
+    driverProcess: deadDriverProcess(),
+    restartDriver: async () => {
+      restarts += 1;
+      return deadDriverProcess();
+    },
+  });
+
+  await assert.rejects(
+    () => runtime.tap(new TapAction({ point: new Point({ x: 12, y: 34 }) })),
+    /driver channel closed/,
+    'the original failure must surface rather than a duplicated tap',
+  );
+
+  assert.equal(restarts, 1, 'the driver is still restarted for the next operation');
+  assert.deepEqual(
+    tapCalls,
+    [{ x: 12, y: 34 }],
+    'a tap that may already have reached the device must not be replayed',
+  );
+});
+
+test('IOSSimulator re-executes a read-only capture after restarting a dead driver', async () => {
+  let attempts = 0;
+  let restarts = 0;
+  const grpcClient = {
+    isConnected: true,
+    async getScreenshot() {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('driver channel closed');
+      }
+      return { success: true, screenWidth: 100, screenHeight: 200 };
+    },
+    close() {},
+  };
+
+  const runtime = new IOSSimulator({
+    commonDriverActions: new CommonDriverActions({
+      grpcClient: grpcClient as unknown as GrpcDriverClient,
+    }),
+    simctlClient: {} as never,
+    deviceId: 'SIM-1',
+    driverProcess: deadDriverProcess(),
+    restartDriver: async () => {
+      restarts += 1;
+      return deadDriverProcess();
+    },
+  });
+
+  const response = await runtime.getScreenshot(
+    new GetScreenshotAction(),
+  );
+
+  assert.equal(response.success, true);
+  assert.equal(restarts, 1);
+  assert.equal(attempts, 2, 'a read-only capture is safe to replay and is replayed');
 });

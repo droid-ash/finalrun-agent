@@ -16,6 +16,17 @@ message Point {
   int32 y = 2;
 }
 
+// A point expressed as a FRACTION of the screen in the range 0.0–1.0 — NOT a
+// 0–100 percentage, despite the field names. The screen centre is
+// {0.5, 0.5} and the top-left corner is {0.0, 0.0}, which is a valid point.
+// A driver converts with `x_percent * screen_width`, never `/ 100`.
+//
+// The range was undocumented here for as long as the two drivers disagreed
+// about it, which is exactly how they came to disagree: the TypeScript client
+// has always sent fractions (see PointPercent.fromJson's fixtures in
+// packages/common/src/models/test/DeviceAction.test.ts) and iOS has always
+// multiplied, while Android also divided by 100 and so tapped the top-left
+// corner for every input.
 message PointPercent {
   double x_percent = 1;
   double y_percent = 2;
@@ -94,7 +105,11 @@ message LaunchAppRequest {
   AppUpload app_upload = 1;
   bool allow_all_permissions = 2;
   map<string, SingleArgument> arguments = 3;
-  // Field 4 was deep_link - removed now
+  // Tag 4 held `deep_link`. `reserved` — not a comment — is what stops it
+  // being reused: the schema is resolved at RUNTIME by @grpc/proto-loader, so
+  // a reused tag 4 would silently misdeserialise old wire bytes with no error
+  // anywhere, while `reserved` makes the reuse a parse failure.
+  reserved 4;
   map<string, string> permissions = 5;
   bool should_uninstall_before_launch = 6;
 }

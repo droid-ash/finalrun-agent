@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { openAsBlob } from 'node:fs';
 import { formatBytes } from './submit.js';
 import { prepareAppForUpload } from './appBundle.js';
+import { parseTimeoutMsFromEnv } from './timeoutEnv.js';
 
 export interface UploadAppInput {
   appPath: string;
@@ -20,19 +21,7 @@ export interface UploadAppResult {
 // Generous timeout to accommodate large app uploads on slow uplinks while
 // still catching genuinely stalled connections. Override with
 // FINALRUN_UPLOAD_TIMEOUT_MS for ultra-large uploads or low-bandwidth tests.
-const UPLOAD_TIMEOUT_MS = parseTimeoutMs('FINALRUN_UPLOAD_TIMEOUT_MS', 30 * 60 * 1000);
-
-function parseTimeoutMs(envVar: string, defaultMs: number): number {
-  const raw = process.env[envVar];
-  if (raw === undefined || raw === '') return defaultMs;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(
-      `Invalid ${envVar}=${JSON.stringify(raw)}: must be a positive integer (milliseconds).`,
-    );
-  }
-  return parsed;
-}
+const UPLOAD_TIMEOUT_MS = parseTimeoutMsFromEnv('FINALRUN_UPLOAD_TIMEOUT_MS', 30 * 60 * 1000);
 
 export async function uploadApp(input: UploadAppInput): Promise<UploadAppResult> {
   // Server validates the binary authoritatively after upload (platform,

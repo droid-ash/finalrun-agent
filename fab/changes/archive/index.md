@@ -1,5 +1,6 @@
 # Archive Index
 
+- **260730-ggeg-drivers-ci-gate-audit-defects** — drivers ci gate audit defects
 - **260728-xn7o-ci-verdict-every-push-required-check** — A CI Verdict For Every Push, Enforced
 - **260728-o3me-fix-deferred-error-path-defects** — Fix Deferred Error-Path Defects
 - **260728-uloy-harden-gate-clear-safe-backlog** — Harden the CI Gate and Clear the Zero-Risk Backlog
