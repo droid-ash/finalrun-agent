@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 16
@@ -33,18 +33,20 @@ stage_metrics:
     apply: {started_at: "2026-07-30T09:27:59Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-30T09:42:51Z"}
     review: {started_at: "2026-07-30T09:42:51Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-30T09:57:47Z"}
     hydrate: {started_at: "2026-07-30T09:57:47Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-30T10:13:50Z"}
-    ship: {started_at: "2026-07-30T10:13:50Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-30T10:13:50Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-30T10:17:21Z"}
+    review-pr: {started_at: "2026-07-30T10:17:21Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/167
 true_impact:
-    added: 0
-    deleted: 0
-    net: 0
+    added: 3179
+    deleted: 104
+    net: 3075
     tests:
-        added: 0
-        deleted: 0
-        net: 0
-    computed_at: "2026-07-30T10:13:50Z"
-    computed_at_stage: hydrate
+        added: 767
+        deleted: 9
+        net: 758
+    computed_at: "2026-07-30T10:17:21Z"
+    computed_at_stage: ship
 summary: 'fix: add the drivers.yml compile gate for the Kotlin/Swift drivers and fix 15 audit defects across the gRPC contract, device-node log capture and driver recovery, cli host preflight, and the cloud-core timeout parser'
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-30T10:13:50Z
+last_updated: 2026-07-30T10:17:21Z
