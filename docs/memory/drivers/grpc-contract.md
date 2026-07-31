@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "The cross-language gRPC contract in proto/finalrun/driver.proto, shared by Kotlin, Swift and TypeScript: `x_percent`/`y_percent` are 0–1 fractions not percentages, screenshot `quality` defaults to 5, `reserved 4;` guards a retired tag against runtime schema resolution, the streaming interval is a Double division with fps clamped 1–60, an unimplemented RPC returns `success = false`, and the three Android hierarchy traversals diverge on purpose. Native changes ship compile-verified only."
+description: "The gRPC contract in proto/finalrun/driver.proto, shared across Kotlin, Swift and TypeScript: `x_percent`/`y_percent` are 0–1 fractions not percentages, screenshot `quality` defaults to 5, `reserved 4;` guards a retired tag, the streaming interval is a Double division, fps clamped 1–60, an unimplemented RPC returns `success = false`, the three Android hierarchy traversals diverge on purpose. Native changes are compile-verified only; a green ios job never proves committed Swift matches the proto."
 ---
 # gRPC Driver Contract (drivers)
 
@@ -215,6 +215,19 @@ why `proto/**` is on it, are in that file), so a change that breaks a native bui
 listed path merges with no automated verification at all — which makes widening the filter part of
 adding any new native build input.
 
+**The ceiling is lower on the iOS side of this contract than on the Android side: a green `ios` job is
+not evidence the committed Swift bindings match `driver.proto`.** The Android driver compiles the proto
+**from source** (`drivers/android/app/build.gradle.kts:104` puts the repo-root `proto` directory on the
+protobuf source path), so a schema edit that breaks Kotlin fails the `android` job. iOS compiles the
+**committed generated** Swift at `drivers/ios/finalrun-ios-test/Generated/finalrun/driver.pb.swift`,
+and there is **no Swift codegen anywhere in this repository** — nothing regenerates that file, and
+nothing compares it against the schema. A proto edit that leaves it untouched therefore desyncs the
+iOS bindings, and the `ios` job compiles and links that untouched file and reports green. Keeping
+the committed Swift in step with `driver.proto` is a **manual obligation of every proto change**, and
+no CI signal substitutes for it: `proto/**` sits on the gate's paths filter for the Android compile's
+sake ([/ci/pr-quality-gate.md](/ci/pr-quality-gate.md)), which means the workflow *runs* on a proto
+edit but cannot check the half that has no generator.
+
 A change to Kotlin or Swift in this repo is therefore **source-verified plus compile-verified**, and
 MUST be described that way. Behavioural confirmation needs a manual device session. Where a native
 change's correct behaviour happens to be pinned by the TypeScript side — the 0–1 fraction contract is
@@ -227,6 +240,15 @@ imply otherwise.
 - **GIVEN** a development environment with no JDK, no Android SDK and no Xcode
 - **WHEN** a Kotlin or Swift change is made
 - **THEN** it cannot be compiled locally, the pull request's `drivers` workflow run is its first execution, and the change records that its verification is compilation rather than behaviour
+
+#### Scenario: a proto edit that leaves the committed Swift untouched
+
+- **GIVEN** a change to `proto/finalrun/driver.proto` that does not regenerate
+  `drivers/ios/finalrun-ios-test/Generated/finalrun/driver.pb.swift`
+- **WHEN** the `drivers` workflow runs (it does — `proto/**` is on its paths filter)
+- **THEN** the `android` job compiles the edited schema from source, while the `ios` job compiles the
+  stale committed Swift and reports **green** — the desync is invisible to every automated check in the
+  repository and is caught only by regenerating or reading the bindings
 
 ## Design Decisions
 

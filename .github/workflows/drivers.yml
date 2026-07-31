@@ -3,8 +3,9 @@ name: Drivers
 # Compile gate for the two native drivers under drivers/ — the only automated
 # verification they have. Before this workflow existed, nothing in
 # .github/workflows/ mentioned gradle, xcodebuild, Kotlin or Swift: a bad edit
-# to the 44 native files was caught by a dead device in someone's manual
-# session, not by a failing check.
+# to the 47 native build-input files (24 Kotlin + 20 Swift + 3 *.gradle.kts)
+# was caught by a dead device in someone's manual session, not by a failing
+# check.
 #
 # COMPILE ONLY — deliberately no test execution:
 #   - drivers/android/app/src/androidTest/ IS the driver (23 of 24 Kotlin
@@ -52,6 +53,12 @@ on:
   #     directory as a protobuf source dir, so the Android driver compiles
   #     proto/finalrun/driver.proto from source on every build. A proto edit can
   #     break the Kotlin compile with no file under drivers/ changing at all.
+  #     That justification holds for the ANDROID compile only: iOS compiles the
+  #     committed generated Swift under drivers/ios/finalrun-ios-test/Generated/
+  #     and there is no Swift codegen anywhere in this repo, so a proto change
+  #     that desyncs the committed Swift still produces a GREEN ios job. A
+  #     green drivers run is NOT evidence the iOS bindings are in sync with
+  #     the proto.
   #   - the two build scripts — each job's single `run:` step is one of them, so
   #     a change to either changes what this gate actually does.
   #   - this workflow file — so a change to the gate is verified by the gate.
@@ -77,6 +84,23 @@ on:
       - 'scripts/build-drivers-android.sh'
       - 'scripts/build-drivers-ios.sh'
       - '.github/workflows/drivers.yml'
+  # The two paths-filtered triggers above mean nothing exercises this gate
+  # between driver changes, while macos-latest and the unpinned Xcode toolchain
+  # rotate underneath it — a runner-image rotation would surface as a red check
+  # on whichever unrelated PR next touches a driver path, where it reads as that
+  # PR's fault. workflow_dispatch gives an on-demand run against any ref. The
+  # weekly schedule targets ~7 days of maximum staleness at ~4 macOS runs per
+  # month (a scheduled run can be delayed or dropped under high Actions load, so
+  # the bound is a target, not a guarantee), so a rotation surfaces as a
+  # scheduled-run failure attributable to the rotation. `schedule` ignores
+  # `paths` filters by design and runs against the default-branch tip — exactly
+  # the coverage the filtered triggers give up.
+  # Platform caveat: GitHub auto-disables cron after 60 days of repo inactivity
+  # — acceptable here, since an inactive repo isn't merging PRs that a stale
+  # green would mislead.
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1' # weekly, Mon 05:17 UTC — non-zero minute per GitHub guidance to avoid top-of-hour load spikes
 
 # Supersede in-flight PR runs; never queue or evict a main run.
 #
@@ -135,9 +159,14 @@ jobs:
   # windows-latest runner, so a second runner OS is established precedent.
   ios:
     runs-on: macos-latest
-    # Worst `ios` run observed across five recorded runs: 9m20s (5m36s, 5m57s,
-    # 6m57s, 7m28s, 9m20s — the longest being the push-to-main run), so 25
-    # leaves ~2.7x headroom. Deliberately the tighter bound RELATIVE to its
+    # Worst `ios` run across all 17 runs recorded as of 2026-07-31: 10m03s
+    # (run 30572535194, a pull_request run on PR #168's own branch), so 25
+    # leaves ~2.5x headroom (25/10.05 ≈ 2.49). Stated as a dated observation
+    # deliberately: the previous version of this comment cited a worst-of-five
+    # sample that was falsified 14 seconds after it shipped, by its own push's
+    # run — a fixed sample rots, while an as-of date is superseded by later,
+    # slower runs rather than contradicted.
+    # Deliberately the tighter bound RELATIVE to its
     # worst run, because macos-latest bills at 10x: a hung xcodebuild now costs
     # 250 billable minutes instead of the ~3,600 the 360-minute default allows.
     # A spurious timeout is a red job a re-run clears — visible and
@@ -145,6 +174,22 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
+      # build-drivers-ios.sh wipes DerivedData every run (rm -rf at line 11), so
+      # without a cache all 22 packages in Package.resolved re-resolve from
+      # github.com on every run — the dominant cost at the 10x macOS rate and the
+      # dominant variance the 25-minute cap has to absorb. This caches SPM's
+      # GLOBAL clone cache (~/Library/Caches/org.swift.swiftpm), which survives
+      # the DerivedData wipe: xcodebuild's package resolution copies from it
+      # instead of cloning over the network. Keyed on Package.resolved so a
+      # dependency bump repopulates; restore-keys makes a stale cache a partial
+      # hit (only changed packages re-clone), not a miss.
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('drivers/ios/finalrun-ios.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
 
       # The same script `npm run build:drivers:ios` runs. It uses
       # `build-for-testing`, not plain `build`: build-for-testing is what emits

@@ -1,0 +1,51 @@
+id: 0sg1
+name: 260731-0sg1-harden-drivers-ci-workflow
+created: 2026-07-31T10:35:24Z
+created_by: droid-ash
+change_type: ci
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 7
+    acceptance_count: 12
+    acceptance_completed: 12
+confidence:
+    certain: 9
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 5.0
+    fuzzy: true
+    dimensions:
+        signal: 88.5
+        reversibility: 86.5
+        competence: 90.0
+        disambiguation: 85.0
+stage_metrics:
+    intake: {started_at: "2026-07-31T10:35:24Z", driver: fab-new, iterations: 1, completed_at: "2026-07-31T10:40:40Z"}
+    apply: {started_at: "2026-07-31T10:40:40Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:46:34Z"}
+    review: {started_at: "2026-07-31T10:46:34Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:57:21Z"}
+    hydrate: {started_at: "2026-07-31T10:57:21Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:07:40Z"}
+    ship: {started_at: "2026-07-31T11:07:40Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-31T11:07:40Z"
+    computed_at_stage: hydrate
+summary: drivers.yml gains workflow_dispatch + a weekly cron and an SPM global-cache step on ios; the falsified worst-of-five ios timeout claim, the bare 44-file count, and the Android-only proto/** justification are corrected in memory and in the workflow
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-31T11:07:40Z

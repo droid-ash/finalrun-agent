@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint), a completed verdict per push, `test` required to merge (ruleset 14531661); plus the additive compile-only drivers.yml gate for the Kotlin/Swift drivers — path-filtered, timeout-bounded, PR-run-cancelling. No `--if-present` fan-outs; code-quality rules are ESLint warnings, tests exempt from function length only; strict explicit-discovery runners (Node 20.19 lacks globs); refactors characterize untested code first."
+description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → test → lint) — a completed verdict per push, `test` required to merge via ruleset 14531661 — and the additive compile-only drivers.yml native gate: paths-filtered PR/push plus dispatch and a weekly cron, gradle + SPM caches, measured timeouts, PR-run-cancelling. Also: no `--if-present` fan-outs, ESLint code-quality warnings (tests exempt from length), explicit-discovery test runners for the Node 20.19 floor, characterize-then-refactor."
 ---
 # PR Quality Gate (ci)
 
@@ -8,7 +8,7 @@ description: "Two PR workflows: ci.yml (`npm ci` → build → typecheck → tes
 
 ## Overview
 
-Two workflows gate a pull request. `.github/workflows/ci.yml` is the TypeScript quality gate and the one whose verdict is required to merge; `.github/workflows/drivers.yml` is an additive compile-only gate over the native `drivers/` tree (below). Both are wired to `pull_request` targeting `main` and to `push` to `main` as a post-merge safety net — `ci.yml` unconditionally, `drivers.yml` only when the diff touches one of the driver-relevant paths its `paths:` filter names. `ci.yml` is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and its `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
+Two workflows gate a pull request. `.github/workflows/ci.yml` is the TypeScript quality gate and the one whose verdict is required to merge; `.github/workflows/drivers.yml` is an additive compile-only gate over the native `drivers/` tree (below). Both are wired to `pull_request` targeting `main` and to `push` to `main` as a post-merge safety net — `ci.yml` unconditionally, `drivers.yml` only when the diff touches one of the driver-relevant paths its `paths:` filter names; `drivers.yml` carries two further triggers, `workflow_dispatch` and a weekly `schedule`, which are the only things that exercise the native gate between driver changes. `ci.yml` is enforced, not advisory: every push to an open PR gets its own completed verdict (runs are never cancelled), and its `test` check is required to merge via repo ruleset `14531661`. Its installs — and `release.yml`'s — are pinned to the committed root `package-lock.json`, so a run's outcome depends on what changed rather than on when it ran. The other non-obvious part is the test-runner contract: because CI pins Node 20.19 — the `engines.node >= 20.19.0` floor — and `node --test` gained glob expansion only in Node 21, tests cannot run via a glob and instead go through explicit file-discovery runner scripts.
 
 ## Requirements
 
@@ -122,19 +122,27 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **WHEN** a test is written for it
 - **THEN** it is placed at `src/infra/android/test/Foo.test.ts` and imports its subject as `../Foo.js`, with no runner or config change required
 
-### Requirement: Both native drivers compile on every driver-relevant pull request
-`.github/workflows/drivers.yml` MUST build the Android driver — the debug + androidTest APK pair, on `ubuntu-latest` with `actions/setup-java@v4` JDK 17 (AGP 8.1.4's requirement) and a gradle cache — and the iOS driver via `build-for-testing` on `macos-latest`, on every `pull_request` targeting `main` and every `push` to `main` **whose diff touches a driver-relevant path**. Both APKs are required: the driver lives under `app/src/androidTest/`, so it ships as an instrumentation-test APK and a release build produces artifacts that cannot host it. Each platform's build MUST be a single invocation of the repo's existing script — `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — never a restated gradle/xcodebuild command line, so the task list and the script's own `-Runner.app` assertions live in one place. `build-for-testing` rather than plain `build` is load-bearing for the same reason: it is what emits the `-Runner.app` the script asserts on.
+### Requirement: Both native drivers compile on every driver-relevant change, on demand, and weekly
+`.github/workflows/drivers.yml` MUST build the Android driver — the debug + androidTest APK pair, on `ubuntu-latest` with `actions/setup-java@v4` JDK 17 (AGP 8.1.4's requirement) and a gradle cache — and the iOS driver via `build-for-testing` on `macos-latest` with a cached SPM clone store (below), on every one of the workflow's four triggers. Both APKs are required: the driver lives under `app/src/androidTest/`, so it ships as an instrumentation-test APK and a release build produces artifacts that cannot host it. Each platform's build MUST be a single invocation of the repo's existing script — `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — never a restated gradle/xcodebuild command line, so the task list and the script's own `-Runner.app` assertions live in one place. `build-for-testing` rather than plain `build` is load-bearing for the same reason: it is what emits the `-Runner.app` the script asserts on.
 
-**"Driver-relevant" is defined by a five-entry `paths:` filter, carried on both triggers.** The same list is duplicated verbatim under `pull_request` and under `push` and MUST stay byte-identical; each entry is derived from what the two builds actually consume:
+**Four triggers, of which only two are paths-filtered.** `pull_request` (targeting `main`) and `push` (to `main`) each carry the five-entry `paths:` filter below, so they fire only on a diff touching a driver-relevant path. `workflow_dispatch` adds an on-demand run against **any ref**, and `schedule` — `cron: '17 5 * * 1'`, weekly on Monday at 05:17 UTC, the non-zero minute deliberate per GitHub's guidance against top-of-hour load spikes — runs the default-branch tip, ignoring `paths` filters by design. The unfiltered pair exists because the workflow pins neither of its floating inputs: `runs-on` is `macos-latest`/`ubuntu-latest` and the Xcode version comes from whatever the image ships, so a runner-image or toolchain rotation can break a build with **no repo change to attribute it to** — and under the filtered triggers alone the first symptom would be a red check on whichever unrelated PR next touched a driver path, where it reads as that PR's fault. The scheduled run makes the same rotation surface as a scheduled failure on the default branch instead, and `workflow_dispatch` makes the gate runnable against a ref on demand rather than only as a side effect of a driver-path diff.
+
+**The scheduled run's staleness bound is a target, not a guarantee.** The weekly cron targets ~7 days as the maximum age of the last known-good native compile, at ~4 macOS runs a month, but two platform behaviours can stretch it: a scheduled run may be **delayed or dropped** entirely under high Actions load, and GitHub **auto-disables** a repository's cron schedules after **60 days of repo inactivity**. The 60-day disable is accepted rather than worked around — an inactive repo is not merging the pull requests a stale green would mislead — but neither behaviour may be described as bounded. A dispatched run and a scheduled run each resolve the `concurrency` group ternary (below) to their own `github.run_id`, so each is alone in its group — neither cancelled, queued behind, nor evicted by another — exactly as a `push` to `main` is.
+
+**"Driver-relevant" is defined by a five-entry `paths:` filter, carried on the two filtered triggers.** The same list is duplicated verbatim under `pull_request` and under `push` and MUST stay byte-identical; each entry is derived from what the two builds actually consume:
 
 - `drivers/**` — both native trees, their gradle files, the gradle wrapper, the Xcode project, and the committed generated Swift under `drivers/ios/finalrun-ios-test/Generated/`.
-- `proto/**` — the entry a reader would not predict and the one whose omission would be invisible. `drivers/android/app/build.gradle.kts:104` adds the repo-root `proto` directory as a protobuf source dir, so the Android driver compiles `proto/finalrun/driver.proto` **from source** on every build: a proto edit can break the Kotlin compile with no file under `drivers/` changing at all. The in-file comment cites that line, so the dependency is not re-litigated from the filter alone.
+- `proto/**` — the entry a reader would not predict and the one whose omission would be invisible. `drivers/android/app/build.gradle.kts:104` adds the repo-root `proto` directory as a protobuf source dir, so the Android driver compiles `proto/finalrun/driver.proto` **from source** on every build: a proto edit can break the Kotlin compile with no file under `drivers/` changing at all. The in-file comment cites that line, so the dependency is not re-litigated from the filter alone. **That justification holds for the Android compile only**: iOS compiles the *committed* generated Swift under `drivers/ios/finalrun-ios-test/Generated/` and there is no Swift codegen anywhere in this repo, so a proto edit that desyncs those bindings still produces a **green** `ios` job. `proto/**` therefore buys the Android half a real schema check and the iOS half none, and a green `drivers` run is not evidence the iOS bindings match the proto ([/drivers/grpc-contract.md](/drivers/grpc-contract.md) records that ceiling and what it makes a manual obligation).
 - `scripts/build-drivers-android.sh`, `scripts/build-drivers-ios.sh` — each job's single `run:` step is one of them, so a change to either changes what the gate does.
 - `.github/workflows/drivers.yml` — so a change to the gate is verified by the gate.
 
+**What the filter protects is 47 native build-input files — 24 Kotlin + 20 Swift + 3 `*.gradle.kts` as of 2026-07-31.** The figure MUST be stated together with that definition wherever it appears (the workflow's header comment carries both), because the definition is what the next added or deleted native file silently changes — the decision on measured claims below generalises the rule.
+
 `resources/android/` and `resources/ios/` are deliberately **absent**: they are the build scripts' output staging directories, not build inputs. Filtering `push` as well as `pull_request` is intentional — a merge whose diff touches no driver path cannot break either native build, and a merge that does touch one still matches and still runs the post-merge net (including the two-PR combination case, where each merge commit carries its own driver-path diff). A `paths` filter means the workflow does not run **at all** when nothing matching changed: the check is **absent, not green**. That is safe only because these two jobs are required by nothing (below), and the filter MUST never be copied to `ci.yml` without also adding an always-runs sentinel job.
 
-**Both jobs carry a measured job-level `timeout-minutes`** — `15` on `android`, `25` on `ios` — declared at job level so checkout and toolchain setup are inside the bound rather than only the build step. Each value is ≥2× the worst duration observed across five recorded runs (`android` worst 2m36s, ~5.8× headroom; `ios` worst 9m20s, ~2.7×) and carries an in-file comment naming that measurement, so a reader can tell a measured bound from a guessed one. `ios` is deliberately the tighter bound *relative to* its worst run because `macos-latest` bills at 10×: the cap replaces GitHub's 360-minute default, so a wedged `xcodebuild` costs 250 billable minutes instead of ~3,600. The values MUST NOT be raised to a cap so generous it defeats its own purpose — a spurious timeout is a red job a re-run clears, which is the failure direction to prefer.
+**The `ios` job caches SPM's global clone store, because the build script wipes DerivedData.** `scripts/build-drivers-ios.sh` deletes `drivers/ios/.derived-data` outright (`rm -rf`, line 11) on every invocation, so nothing Swift Package Manager resolved *into* DerivedData survives a run: without a cache all 22 package identities in `drivers/ios/finalrun-ios.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` re-clone from github.com every single run, which at the 10× `macos-latest` rate is both the job's dominant cost and the dominant variance its 25-minute cap has to absorb. The job therefore carries an `actions/cache@v4` step between checkout and the build over `~/Library/Caches/org.swift.swiftpm` — SPM's **global** clone cache, which lives outside DerivedData and survives the wipe, so `xcodebuild`'s package resolution copies from it instead of cloning over the network. The key is `spm-${{ runner.os }}-${{ hashFiles('…/Package.resolved') }}` with a `spm-${{ runner.os }}-` restore-key prefix, so a dependency bump repopulates the entry rather than serving a wrong tree, and a stale entry degrades to a partial hit (only changed packages re-clone) rather than a miss. `android` gets the equivalent from `actions/setup-java@v4`'s `cache: gradle`, keyed on the wrapper properties and the `*.gradle.kts` files.
+
+**Both jobs carry a measured job-level `timeout-minutes`** — `15` on `android`, `25` on `ios` — declared at job level so checkout and toolchain setup are inside the bound rather than only the build step. Each value is ≥2× the worst duration observed for its own job: `android`'s worst across five recorded runs is 2m36s (~5.8× headroom), and `ios`'s worst across all 17 runs recorded as of **2026-07-31** is **10m03s** — run `30572535194`, a `pull_request` run on PR #168's own branch — leaving ~2.49× headroom. Each job's in-file comment names its own measurement, so a reader can tell a measured bound from a guessed one; the `ios` claim is deliberately phrased as a dated, run-id-anchored observation rather than an enumerated sample (decision below). `ios` is deliberately the tighter bound *relative to* its worst run because `macos-latest` bills at 10×: the cap replaces GitHub's 360-minute default, so a wedged `xcodebuild` costs 250 billable minutes instead of ~3,600. The values MUST NOT be raised to a cap so generous it defeats its own purpose — a spurious timeout is a red job a re-run clears, which is the failure direction to prefer.
 
 **A newer push cancels the PR run it replaces; a run on `main` is never cancelled.** The workflow carries a workflow-level `concurrency` block whose `group` is `drivers-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}` and whose `cancel-in-progress` is `${{ github.event_name == 'pull_request' }}`. On a pull request the group is the PR ref, so a newer push cancels the run the previous push started; on a `push` to `main` the group key is the per-run-unique `github.run_id`, so every `main` run is alone in its group and is neither cancelled, queued behind, nor evicted by another. Both halves of that key are load-bearing and neither is simplifiable — the decision below records why, and why the same block on `ci.yml` would break the guarantee `ci.yml` exists to provide.
 
@@ -159,6 +167,20 @@ This costs nothing at the tooling layer and requires no runner change: every run
 - **GIVEN** a pull request that edits `proto/finalrun/driver.proto` and nothing under `drivers/`
 - **WHEN** the triggers are evaluated
 - **THEN** the workflow runs, because `proto/**` is in the filter and the Android build compiles that file from source
+- **AND** the `android` job compiles the edited schema from source while the `ios` job compiles the unchanged committed Swift, so a green `ios` job says nothing about whether the bindings still match
+
+#### Scenario: a runner-image rotation between driver changes
+- **GIVEN** a stretch of weeks in which no diff touches a driver-relevant path, and a `macos-latest` image rotation that breaks the iOS build
+- **WHEN** the weekly `schedule` fires against the default-branch tip
+- **THEN** the `ios` job fails on a run whose only changed input is the image, so the breakage is attributable to the rotation instead of to whichever unrelated PR next touches a driver path
+
+#### Scenario: the `ios` job runs with a warm SPM cache
+- **GIVEN** a cache entry saved under the current `Package.resolved` hash
+- **WHEN** the job runs and `build-drivers-ios.sh` deletes `drivers/ios/.derived-data` before building
+- **THEN** package resolution restores from `~/Library/Caches/org.swift.swiftpm` and copies locally rather than cloning 22 repositories from github.com
+- **GIVEN** a pull request that bumps a dependency, so the exact key misses
+- **WHEN** the restore step runs
+- **THEN** the `spm-${{ runner.os }}-` restore-key serves the previous entry as a partial hit and only the changed packages re-clone
 
 #### Scenario: rapid pushes to a PR, and rapid merges to `main`
 - **GIVEN** an in-flight `drivers` run on a pull request and a newer push to the same PR
@@ -338,8 +360,8 @@ job over `[ubuntu, macos]` — the two builds share no steps beyond checkout; (c
 gradle/xcodebuild invocations in the workflow — two copies of a build contract that already exists
 as a script, and the iOS script's `-Runner.app` assertions would be lost; (d) a `paths:` filter
 confined to `drivers/ios/**`, or applied to the `ios` job alone — the macOS-minutes constraint the
-filter answers is measured (10× billing, a 9m20s worst `ios` run, ~200 billable minutes for one
-PR's three pushes), but a filter that narrow answers it wrongly: the Android job compiles
+filter answers is measured (10× billing, a worst `ios` run on the order of ten minutes, ~200
+billable minutes for one PR's three pushes), but a filter that narrow answers it wrongly: the Android job compiles
 `proto/finalrun/driver.proto` from source, so an `ios`-only or `drivers/ios/**`-only list leaves the
 Android job paying on every PR while the one path that can break it silently goes unlisted. The
 filter is broader on both axes — `drivers/**`, `proto/**`, both build scripts and this workflow
@@ -397,6 +419,76 @@ harness is its own change with its own argument, and bundling it would hide whic
 certified; (c) stubbing a token native test so the gate "has tests" — a test that asserts nothing
 reads as coverage and is worse than an acknowledged gap.
 *Introduced by*: 260730-zga4-drivers-ci-gate-audit-defects
+
+### A weekly cron plus on-demand dispatch covers what a paths filter cannot
+**Decision**: `drivers.yml` carries `workflow_dispatch:` and `schedule: [cron: '17 5 * * 1']` (weekly,
+Monday 05:17 UTC) alongside its two paths-filtered triggers, and the ~7-day staleness figure is stated
+as a target rather than a guarantee.
+**Why**: A paths filter answers a cost question and creates a coverage one: between driver changes
+nothing exercises the gate, while the two inputs the workflow does not pin — the runner image
+(`macos-latest`/`ubuntu-latest`) and the Xcode toolchain it ships — rotate underneath it. A rotation is
+a break with no repo change to blame, so under filtered triggers alone it lands as a red check on an
+unrelated PR that happened to touch a driver path. `schedule` ignores `paths` filters and runs the
+default-branch tip, which is exactly the coverage the filters give up, and weekly matches the cadence
+of the thing being watched (image rotations move in weeks-to-months) at ~4 macOS runs a month — each
+≈7–10 macOS-minutes, ≈70–100 billable at 10×. The bound is a *target* because two platform behaviours
+stretch it: a scheduled run can be delayed or dropped under high Actions load, and GitHub auto-disables
+cron after 60 days of repo inactivity. `workflow_dispatch` is the other half — a rotation suspected
+today is checkable today, against any ref, without inventing a driver-path diff.
+**Rejected**: (a) daily — ~7× the macOS spend to shorten a detection window that a weeks-to-months
+failure cadence does not reward; (b) monthly — a rotation hides for up to 31 days, which is the
+pre-existing failure mode barely improved; (c) `workflow_dispatch` alone — on-demand coverage requires
+someone to remember to use it, which is the gap being closed; (d) pinning the runner image and Xcode
+version instead — a different mitigation with its own upkeep and its own rot, and it answers "make
+rotation impossible" rather than "make rotation detectable"; the schedule stays useful either way; (e)
+claiming the 7 days as a guarantee — the delivery caveats above are GitHub's, not this repo's, and an
+overstated bound is exactly the kind of claim this file's other decisions exist to prevent.
+*Introduced by*: 260731-0sg1-harden-drivers-ci-workflow
+
+### The SPM cache targets the global clone store, not DerivedData
+**Decision**: The `ios` job caches `~/Library/Caches/org.swift.swiftpm` with `actions/cache@v4`, keyed
+on the committed `Package.resolved` hash with a `spm-${{ runner.os }}-` restore-key prefix, and it
+requires no build-script edit to work.
+**Why**: `build-drivers-ios.sh` wipes DerivedData (`rm -rf`, line 11) at the start of every run, so the
+per-build package checkout is gone by construction and caching it is not an option — but SPM's global
+clone store lives outside DerivedData, survives the wipe, and is what `xcodebuild`'s resolution copies
+from, so caching it turns 22 network clones per run into a local copy. That is the largest term in the
+job's cost and its variance, both billed at 10×, which is also what the 25-minute cap has to absorb.
+Keying on `Package.resolved` means a dependency bump repopulates rather than serving a stale tree, and
+the restore-key prefix makes a near-miss a partial hit where only changed packages re-clone.
+**Rejected**: (a) `-clonedSourcePackagesDirPath` pointed at a cacheable directory — it works, but only
+by editing `scripts/build-drivers-ios.sh`, which changes what the gate runs locally as well as in CI
+and puts a cache concern inside the build contract; the global store needs no script change; (b)
+caching DerivedData — deleted before every build, so a restored entry could never be read; (c) no cache
+at all, on the reading that the timeout already absorbs the variance — a cap bounds the damage without
+reducing what is paid on every green run; (d) removing the `rm -rf` from the script so DerivedData
+becomes cacheable — the clean-build guarantee is the script's, and trading it for a cache is a
+behaviour change to the build, not a CI configuration change.
+*Introduced by*: 260731-0sg1-harden-drivers-ci-workflow
+
+### A measured claim states its derivation, so a later reading supersedes it rather than falsifying it
+**Decision**: Measured claims in CI comments and in this file are written so a later observation can
+only supersede them: a **timing** claim is a dated, run-id-anchored observation ("worst across all 17
+runs recorded as of 2026-07-31: 10m03s, run `30572535194`"), and a **count** carries its definition
+inline ("47 native build-input files — 24 Kotlin + 20 Swift + 3 `*.gradle.kts`").
+**Why**: Both shapes have already failed here, in the same way. The `ios` timeout's worst-of-five
+sample was true when it was written and false 14 seconds later, falsified by the run its own shipping
+push produced — an enumerated sample is a claim about a window that closes at commit time, and every
+figure derived from it (the headroom multiple) inherits the rot. A bare count failed identically: the
+number stayed plausible while its definition narrowed to Kotlin+Swift after a Kotlin file was deleted,
+so no reader could tell that the figure and its meaning had come apart. A date plus a run id, or a
+count plus its definition, makes the next reader's re-derivation an *update* — a newer worst run, a
+recount under the same definition — instead of a contradiction they must adjudicate against a stale
+sample. This is why the timeout paragraph above states 10m03s with a date and a run id, and the
+file-count sentence states its three summands.
+**Rejected**: (a) enumerating the sample a bound was derived from — the shape that rotted, and it
+invites arithmetic against a set already known to be incomplete; (b) dropping the measurement and
+stating the bound alone — a reader then cannot distinguish a measured bound from a guessed one, which
+is the reason these numbers are in the comments at all; (c) a CI check that re-derives the figures and
+fails on drift — a gate failing on its own comment metadata, for staleness that is cheap and visible;
+(d) keeping the numbers only in memory and out of the workflow — the person deciding whether to raise
+a `timeout-minutes` is reading the workflow file.
+*Introduced by*: 260731-0sg1-harden-drivers-ci-workflow
 
 ### Platform-behaviour claims are verified against GitHub's primary sources
 **Decision**: Statements in this file about how GitHub Actions or repo rulesets behave —
