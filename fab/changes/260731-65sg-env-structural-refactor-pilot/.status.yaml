@@ -10,7 +10,7 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 7
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-31T06:15:55Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:26:47Z"}
     hydrate: {started_at: "2026-07-31T06:26:47Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:32:26Z"}
     ship: {started_at: "2026-07-31T06:32:26Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:34:23Z"}
-    review-pr: {started_at: "2026-07-31T06:34:23Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-31T06:34:23Z", driver: git-pr, iterations: 1, completed_at: "2026-07-31T06:50:11Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/172
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: moves reasoning-level validation to constants.ts beside REASONING_LEVELS, keeps env.ts's re-export block as a compatibility shim, and pins CliEnv's getRequired/includeDotEnv traps with new tests
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T06:34:23Z
+last_updated: 2026-07-31T06:50:11Z
