@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 7
@@ -33,18 +33,20 @@ stage_metrics:
     apply: {started_at: "2026-07-31T03:47:11Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T03:53:17Z"}
     review: {started_at: "2026-07-31T03:53:17Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T04:05:59Z"}
     hydrate: {started_at: "2026-07-31T04:05:59Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T04:11:25Z"}
-    ship: {started_at: "2026-07-31T04:11:25Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-31T04:11:25Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T04:13:12Z"}
+    review-pr: {started_at: "2026-07-31T04:13:12Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/171
 change_type_source: explicit
 true_impact:
-    added: 0
-    deleted: 0
-    net: 0
+    added: 411
+    deleted: 241
+    net: 170
     tests:
-        added: 0
-        deleted: 0
-        net: 0
-    computed_at: "2026-07-31T04:11:25Z"
-    computed_at_stage: hydrate
+        added: 30
+        deleted: 80
+        net: -50
+    computed_at: "2026-07-31T04:13:12Z"
+    computed_at_stage: ship
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T04:11:25Z
+last_updated: 2026-07-31T04:13:12Z
