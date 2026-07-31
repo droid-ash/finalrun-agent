@@ -1,0 +1,18 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-31T10:34:03Z"}
+{"args":"Fix factually wrong secret-leak guarantee comment in testCompiler.ts and assess/mitigate the real prompt-path secret leak it conceals","cmd":"fab-new","event":"command","ts":"2026-07-31T10:34:03Z"}
+{"delta":"+0.0","event":"confidence","score":4.5,"trigger":"calc-score","ts":"2026-07-31T10:36:18Z"}
+{"cmd":"fab-new","event":"command","ts":"2026-07-31T10:36:49Z"}
+{"delta":"+0.0","event":"confidence","score":4.5,"trigger":"calc-score","ts":"2026-07-31T10:39:48Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-31T10:40:22Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T10:40:34Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T10:41:47Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T10:55:52Z"}
+{"event":"review","result":"failed","ts":"2026-07-31T11:07:17Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T11:07:17Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T11:14:29Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-31T11:23:33Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T11:23:33Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-31T11:29:29Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-31T11:32:11Z"}
+{"cmd":"git-pr-review","event":"command","ts":"2026-07-31T11:33:52Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T11:49:39Z"}

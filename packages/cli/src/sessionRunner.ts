@@ -455,6 +455,9 @@ function createSessionExecutor(
     apiKeys: config.apiKeys,
     defaults: config.defaults,
     features: config.features,
+    // Enables AIAgent's prompt-path secret redaction; omitting this would
+    // silently ship prompts with resolved secret values in hierarchy text.
+    bindings: config.runtimeBindings,
   });
 
   return dependencies.createExecutor({

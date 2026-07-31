@@ -1,14 +1,37 @@
 import type { TestDefinition, RuntimeBindings } from '@finalrun/common';
 
-// Secret-leak guard: this pattern deliberately matches ONLY ${variables.*}
-// tokens, never ${secrets.*}. Secret placeholders are left as literal tokens in
-// the compiled prompt — the Execution Rules appended below instruct the model to
-// echo them verbatim — so secret VALUES never enter the LLM prompt, the model
-// provider's logs, or compiled test artifacts. Secrets are substituted only
-// downstream at the point of use (resolveRuntimePlaceholders in
-// packages/common/src/repoPlaceholders.ts, called from ActionExecutor when
-// typing or opening a deeplink). Widening this pattern to secrets would leak
-// their values into every plan/grounder call.
+// Secret-leak guard — COMPILE-TIME SCOPE ONLY. This pattern deliberately
+// matches ${variables.*} tokens and never ${secrets.*}: secret placeholders
+// stay literal tokens in the compiled objective (the Execution Rules appended
+// below instruct the model to echo them verbatim), so neither the compiled
+// test text nor the objective portion of any prompt receives a secret VALUE
+// through placeholder substitution. (A ${variables.*} value that happens to
+// equal a secret still lands in the compiled text — this pattern cannot tell.)
+// Widening this pattern to secrets would bake real values into the compiled
+// test artifact and the planner objective — the durable leak: grounder
+// prompts carry no objective, and the AIAgent redaction seam below catches
+// prompt text only when runtime bindings are wired.
+//
+// That is the WHOLE guarantee; it does not keep secret values out of LLM
+// prompts at runtime. Once ActionExecutor._executeType (or _executeDeeplink)
+// resolves a placeholder (resolveRuntimePlaceholders in
+// packages/common/src/repoPlaceholders.ts) and the value lands on screen, the
+// next captured accessibility hierarchy carries it — grounder prompts emit
+// the typed field's text/hintText/error verbatim
+// (Hierarchy.toPromptElementsForGrounder); planner prompts carry only
+// contentDesc for image/button-class nodes, which can still surface a value
+// rendered into accessibility text — and screenshots show the same screen.
+// The prompt-assembly seam
+// (AIAgent._buildPlannerPrompt/_buildGrounderPrompt in
+// packages/goal-executor/src/ai/AIAgent.ts) redacts exact occurrences of
+// resolved secret values from prompt TEXT back to their ${secrets.*}
+// placeholders, but screenshots reach the model provider UNREDACTED, and any
+// rendering of a secret that is not an exact value match (truncated,
+// reformatted, partially masked by the app) passes through.
+// redactResolvedValue also guards the write paths — report artifacts, spans,
+// error strings (reportWriter.ts, ActionExecutor._redactRuntimeString) — but
+// report screenshots are raw too. Do NOT enable full prompt logging or treat
+// provider-side logs as secret-free on the strength of this guard.
 const VARIABLE_REFERENCE_PATTERN = /\$\{variables\.([A-Za-z0-9_-]+)\}/g;
 
 export function compileTestObjective(

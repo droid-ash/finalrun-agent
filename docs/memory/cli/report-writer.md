@@ -21,6 +21,8 @@ Every value that reaches a file crosses `redactResolvedValue(value, bindings)` (
 
 The environment snapshots carry reference forms only — `env.snapshot.yaml` mirrors the *config* `secrets` map (the `${ENV_VAR}` placeholder form) and `env.json` carries `secretReferences` (key plus env-var name). No resolved secret value is written anywhere beneath the run directory, and `reportWriter.test.ts` holds that as a whole-`runDir` sweep over every emitted file after a full lifecycle rather than as per-site assertions.
 
+The contract is bounded in two ways worth naming, because the sweep's breadth invites reading it as global. It covers **write paths only** — the LLM prompt path is a separate seam, redacted per input inside `AIAgent` when runtime bindings are wired, and stdout INFO output crosses neither ([/cli/test-compiler.md](/cli/test-compiler.md)). And the sweep is a **byte-level** check on emitted files, so `tests/<testId>/screenshots/NNN.jpg` passes it while still showing a typed secret in its pixels: the report carries secret-bearing images even though it carries no secret strings.
+
 ## Device Log Artifact Flow
 
 The `_copyLogArtifact(testId, deviceLog, bindings)` private method handles device logs:

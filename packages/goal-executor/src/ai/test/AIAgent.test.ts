@@ -4,19 +4,28 @@ import {
   FEATURE_GROUNDER,
   FEATURE_PLANNER,
   FEATURE_SCROLL_INDEX_GROUNDER,
+  Hierarchy,
   PLANNER_ACTION_ROTATE,
   PLANNER_ACTION_TAP,
   type FeatureName,
   type FeatureOverrides,
   type ModelDefaults,
+  type RuntimeBindings,
 } from '@finalrun/common';
-import { AIAgent, GrounderResponse, PlannerResponse } from '../AIAgent.js';
+import {
+  AIAgent,
+  GrounderRequest,
+  GrounderResponse,
+  PlannerRequest,
+  PlannerResponse,
+} from '../AIAgent.js';
 import { FatalProviderError } from '../providerFailure.js';
 
 function makeAgent(overrides?: {
   defaults?: Partial<ModelDefaults>;
   features?: FeatureOverrides;
   apiKeys?: Record<string, string>;
+  bindings?: RuntimeBindings;
 }): AIAgent {
   const defaults: ModelDefaults = {
     provider: overrides?.defaults?.provider ?? 'google',
@@ -33,7 +42,36 @@ function makeAgent(overrides?: {
     },
     defaults,
     ...(overrides?.features !== undefined ? { features: overrides.features } : {}),
+    ...(overrides?.bindings !== undefined ? { bindings: overrides.bindings } : {}),
   });
+}
+
+function buildGrounderPrompt(
+  agent: AIAgent,
+  request: GrounderRequest,
+): { userParts: unknown[]; text: string } {
+  return (
+    agent as unknown as {
+      _buildGrounderPrompt: (req: GrounderRequest) => {
+        userParts: unknown[];
+        text: string;
+      };
+    }
+  )._buildGrounderPrompt(request);
+}
+
+function buildPlannerPrompt(
+  agent: AIAgent,
+  request: PlannerRequest,
+): { userParts: unknown[]; textPrompt: string } {
+  return (
+    agent as unknown as {
+      _buildPlannerPrompt: (req: PlannerRequest) => {
+        userParts: unknown[];
+        textPrompt: string;
+      };
+    }
+  )._buildPlannerPrompt(request);
 }
 
 function parsePlannerResponse(output: unknown, rawText = ''): PlannerResponse {
@@ -482,6 +520,182 @@ test('AIAgent rejects grounder responses that are not JSON objects', () => {
     () => parseGrounderResponse(null, ''),
     /Grounder response is not a JSON object/,
   );
+});
+
+// ----------------------------------------------------------------------------
+// Prompt-path secret redaction
+// ----------------------------------------------------------------------------
+
+const SECRET_VALUE = 'hunter2-secret-value';
+const SECRET_BINDINGS: RuntimeBindings = {
+  secrets: { PASSWORD: SECRET_VALUE },
+  variables: {},
+};
+
+function hierarchyWithTypedSecret(text: string): Hierarchy {
+  return Hierarchy.fromFlatJson([
+    {
+      text,
+      id: 'password_field',
+      class: 'android.widget.EditText',
+      bounds: [10, 20, 300, 80],
+      isEditable: true,
+      isFocused: true,
+    },
+    {
+      text: 'Login',
+      id: 'login_button',
+      class: 'android.widget.Button',
+      bounds: [10, 100, 300, 160],
+    },
+  ]);
+}
+
+test('AIAgent redacts a typed secret from the grounder prompt but keeps the element locatable', () => {
+  const hierarchy = hierarchyWithTypedSecret(SECRET_VALUE);
+  const agent = makeAgent({ bindings: SECRET_BINDINGS });
+
+  const { text } = buildGrounderPrompt(agent, {
+    feature: FEATURE_GROUNDER,
+    act: `Verify the password field contains "${SECRET_VALUE}"`,
+    hierarchy,
+    platform: 'android',
+  });
+
+  assert.ok(text.includes('${secrets.PASSWORD}'), 'placeholder present');
+  assert.ok(!text.includes(SECRET_VALUE), 'raw secret absent (elements and act line)');
+  // Locating structure is untouched: index, id, class, bounds all survive.
+  assert.ok(text.includes('"index":0'));
+  assert.ok(text.includes('"id":"password_field"'));
+  assert.ok(text.includes('"bounds":[10,20,300,80]'));
+  assert.ok(text.includes('"isEditable":true'));
+});
+
+test('AIAgent prompt redaction never mutates the Hierarchy itself', () => {
+  const hierarchy = hierarchyWithTypedSecret(SECRET_VALUE);
+  const agent = makeAgent({ bindings: SECRET_BINDINGS });
+
+  buildGrounderPrompt(agent, {
+    feature: FEATURE_GROUNDER,
+    act: 'Tap the login button',
+    hierarchy,
+    platform: 'android',
+  });
+
+  // Index-based grounding resolves against the ORIGINAL nodes: the tap/type
+  // coordinates come from flattenedHierarchy[idx].bounds, not from the prompt.
+  assert.equal(hierarchy.flattenedHierarchy[0]!.text, SECRET_VALUE);
+  assert.deepEqual(hierarchy.flattenedHierarchy[0]!.bounds, [10, 20, 300, 80]);
+});
+
+test('AIAgent redacts secrets from planner hierarchy, history, and remember', () => {
+  // Planner elements require accessibility text on a button/image node.
+  const plannerHierarchy = Hierarchy.fromFlatJson([
+    {
+      content_desc: SECRET_VALUE,
+      class: 'android.widget.Button',
+      bounds: [0, 0, 100, 50],
+    },
+  ]);
+  const agent = makeAgent({ bindings: SECRET_BINDINGS });
+
+  const { textPrompt } = buildPlannerPrompt(agent, {
+    testObjective: 'Type ${secrets.PASSWORD} into the password field',
+    platform: 'android',
+    hierarchy: plannerHierarchy,
+    postActionHierarchy: plannerHierarchy,
+    history: `1. [type] Typed "${SECRET_VALUE}" into the field → SUCCESS\n`,
+    remember: [`The field now shows ${SECRET_VALUE}`],
+  });
+
+  assert.ok(textPrompt.includes('${secrets.PASSWORD}'));
+  assert.ok(!textPrompt.includes(SECRET_VALUE));
+  assert.ok(textPrompt.includes('Post-action ui_elements:'));
+});
+
+test('AIAgent redacts secrets containing JSON-escapable characters', () => {
+  // Redaction runs before JSON.stringify; matching afterwards would miss this
+  // value because `"` and `\` are escaped in the serialized element text.
+  const weirdSecret = 'alpha"beta\\gamma';
+  const hierarchy = hierarchyWithTypedSecret(weirdSecret);
+  const agent = makeAgent({
+    bindings: { secrets: { WEIRD: weirdSecret }, variables: {} },
+  });
+
+  const { text } = buildGrounderPrompt(agent, {
+    feature: FEATURE_GROUNDER,
+    act: 'Verify the field',
+    hierarchy,
+    platform: 'android',
+  });
+
+  assert.ok(text.includes('${secrets.WEIRD}'));
+  assert.ok(!text.includes('alpha'));
+  assert.ok(!text.includes('gamma'));
+});
+
+test('AIAgent redaction leaves structural JSON intact when a secret equals a coordinate', () => {
+  // Regression: a whole-text pass over the assembled prompt used to rewrite
+  // the 1080 inside bounds to ${secrets.PIN}, corrupting the ui_elements JSON.
+  const hierarchy = Hierarchy.fromFlatJson([
+    {
+      text: '1080',
+      id: 'pin_field',
+      class: 'android.widget.EditText',
+      bounds: [0, 0, 1080, 240],
+      isEditable: true,
+    },
+  ]);
+  const agent = makeAgent({
+    bindings: { secrets: { PIN: '1080' }, variables: {} },
+  });
+
+  const { text } = buildGrounderPrompt(agent, {
+    feature: FEATURE_GROUNDER,
+    act: 'Verify the PIN field',
+    hierarchy,
+    platform: 'android',
+  });
+
+  const serialized = text.match(/ui_elements:\n(.*)\n/)?.[1];
+  assert.ok(serialized, 'ui_elements JSON present');
+  const elements = JSON.parse(serialized) as Array<Record<string, unknown>>;
+  assert.deepEqual(elements[0]!['bounds'], [0, 0, 1080, 240]);
+  assert.equal(elements[0]!['text'], '${secrets.PIN}');
+});
+
+test('AIAgent redacts an escapable secret echoed into remember', () => {
+  // Regression: remember was JSON.stringify-ed before redaction, so `"`/`\`
+  // in the secret were escaped and no longer exact-matched the value.
+  const weirdSecret = 'alpha"beta\\gamma';
+  const agent = makeAgent({
+    bindings: { secrets: { WEIRD: weirdSecret }, variables: {} },
+  });
+
+  const { textPrompt } = buildPlannerPrompt(agent, {
+    testObjective: 'Log in',
+    platform: 'android',
+    remember: [`the field shows ${weirdSecret}`],
+  });
+
+  assert.ok(textPrompt.includes('${secrets.WEIRD}'));
+  assert.ok(!textPrompt.includes('alpha'));
+  assert.ok(!textPrompt.includes('gamma'));
+});
+
+test('AIAgent without bindings assembles prompts unredacted', () => {
+  const hierarchy = hierarchyWithTypedSecret(SECRET_VALUE);
+  const agent = makeAgent();
+
+  const { text } = buildGrounderPrompt(agent, {
+    feature: FEATURE_GROUNDER,
+    act: 'Verify the field',
+    hierarchy,
+    platform: 'android',
+  });
+
+  assert.ok(text.includes(SECRET_VALUE));
+  assert.ok(!text.includes('${secrets.PASSWORD}'));
 });
 
 // ----------------------------------------------------------------------------
