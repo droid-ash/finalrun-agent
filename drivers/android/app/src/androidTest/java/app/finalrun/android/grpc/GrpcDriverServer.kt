@@ -10,8 +10,8 @@ import java.util.concurrent.TimeUnit
 /**
  * gRPC server for the Android driver.
  *
- * This replaces WebSocketServerImpl. It starts a gRPC server on the specified port
- * and handles incoming RPC calls from the TypeScript client (packages/device-node).
+ * Starts a gRPC server on the specified port and handles incoming RPC calls
+ * from the TypeScript client (packages/device-node).
  */
 class GrpcDriverServer(private val port: Int) {
     private var server: Server? = null

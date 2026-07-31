@@ -86,9 +86,9 @@ export class LogWriteStreamRegistry {
 
       // The log call is guarded because THIS listener must not throw. `Logger.e`
       // is fallible INDEPENDENTLY of why this stream failed: the sink loop in
-      // `Logger._emit` (`packages/common/src/logger.ts:103-105`) runs each sink
+      // `Logger._emit` (`packages/common/src/logger.ts`) runs each sink
       // with no try/catch, and the CLI installs `ReportWriter.createLoggerSink()`
-      // (`packages/cli/src/reportWriter.ts:132`) — an unguarded synchronous
+      // (`packages/cli/src/reportWriter.ts`) — an unguarded synchronous
       // `fs.appendFileSync` to the runner log — so a full disk, a permissions
       // change or a removed artifacts directory makes the log call throw on its
       // own schedule. The two can also be one failure: this stream writes under

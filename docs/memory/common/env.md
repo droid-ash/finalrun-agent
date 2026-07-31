@@ -111,16 +111,19 @@ the env module that no consumer actually needs.
 carries a comment naming it a backward-compatibility shim. The block retains all nine symbols even
 though no production module imports through it.
 **Why**: `env.test.ts:6` imports `parseModel` and `parseReasoningLevel` from `../env.js`, and the
-constitution's Test Integrity rule forbids editing a test to chase a moved import path — a test
-conforms to the spec, and rewriting it to make a refactor compile inverts that. Keeping the block
+re-export is what keeps that import path resolving — the shim exists for consumer compatibility with
+the one line in the repo that still reaches these symbols through `env.js`. Keeping the block
 also makes `env.js`'s export surface independent of where the validators are defined, which is what
 lets a move like this one claim zero observable behavior change. The block's justification is exactly
 that one import line: no production module imports anything but `CliEnv` from `env.js`, and
 `MODEL_FORMAT_EXAMPLE`, `PROVIDER_ENV_VARS`, `SUPPORTED_AI_PROVIDERS`,
 `SUPPORTED_AI_PROVIDERS_LABEL`, `ParsedModel`, and `SupportedProvider` have no `env.js` consumer
 anywhere in the repo.
-**Rejected**: (a) deleting the barrel and repointing importers — forces an import-path edit in
-`env.test.ts`, which Test Integrity prohibits; (b) leaving a duplicate definition in `env.ts` so
+**Rejected**: (a) deleting the barrel and repointing `env.test.ts`'s import at `../constants.js` —
+an edit the constitution's Test Integrity rule permits (it allows updating a test to match the spec,
+and prohibits only reshaping *implementation* to suit test infrastructure), but one that narrows
+`env.js`'s export surface for no consumer's benefit, and that surface stability is what makes the
+move's zero-observable-change claim checkable; (b) leaving a duplicate definition in `env.ts` so
 the package root's export set stays literally identical — two definitions of the same validator is
 exactly the drift a single home exists to prevent.
 *Introduced by*: 260731-65sg-env-structural-refactor-pilot

@@ -164,8 +164,8 @@ and `finalizeQuietly`'s own `Logger.e` is guarded for the same reason: `finalize
 recorded error is what makes that `catch` reachable on the very failure the guard exists for, and
 `finalizeQuietly` MUST resolve for callers that are already returning a failure. The reason is
 `Logger.e`'s **independent** fallibility: `Logger._emit`'s sink
-loop (`packages/common/src/logger.ts:103-105`) runs every sink with no `try`/`catch`, and the CLI
-installs `ReportWriter.createLoggerSink()` (`packages/cli/src/reportWriter.ts:132`), a bare
+loop (`packages/common/src/logger.ts`) runs every sink with no `try`/`catch`, and the CLI
+installs `ReportWriter.createLoggerSink()` (`packages/cli/src/reportWriter.ts`), a bare
 synchronous `fs.appendFileSync`, so a full disk, a permissions change or a removed artifacts
 directory makes the log call throw on its own schedule. The two failures can also be one, but only
 conditionally: the device log lives at `<os.tmpdir()>/finalrun-logs/…` and the runner log at

@@ -5,8 +5,9 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
 // Backward-compatibility shim: these live in constants.ts, but consumers
-// historically imported them through env.js — env.test.ts still does, and the
-// constitution's Test Integrity rule forbids editing it to chase a new path.
+// historically imported them through env.js and the re-export keeps that
+// import path working — env.test.ts still imports parseModel and
+// parseReasoningLevel via '../env.js'.
 export {
   MODEL_FORMAT_EXAMPLE,
   PROVIDER_ENV_VARS,

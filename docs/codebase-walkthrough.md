@@ -24,7 +24,7 @@ A complete guide to understanding how FinalRun works, from CLI invocation to tes
 
 ## 1. Architecture Overview
 
-FinalRun is a **monorepo with 5 packages** that together form an AI-powered mobile app testing tool:
+FinalRun is a **monorepo with 7 packages** that together form an AI-powered mobile app testing tool:
 
 ```text
 finalrun-ts/
@@ -33,7 +33,9 @@ finalrun-ts/
 │   ├── cli/             CLI commands, test orchestration, report server, artifact writing
 │   ├── goal-executor/   AI agent loop: screenshot → LLM plan → device action → repeat
 │   ├── device-node/     Device management: gRPC driver, screenshots, action execution
-│   └── report-web/      Next.js web app for viewing reports (alternative to built-in server)
+│   ├── cloud-core/      Cloud-submission logic, bundled into the compiled CLI binary
+│   ├── local-runtime/   Per-platform runtime asset bundle (driver APKs/iOS zips, proto, report SPA dist)
+│   └── report-web/      React SPA (Vite) for viewing reports, served by the CLI's report server
 ```
 
 **High-level flow:**
@@ -47,7 +49,7 @@ Report displayed        Artifacts saved to disk      AI executes test on device
   (HTML in browser)  <──────────────────────────  (screenshot → LLM → tap/type → repeat)
 ```
 
-### Why 5 packages?
+### Why 7 packages?
 
 | Package | Reason for separation |
 |---------|----------------------|
@@ -55,7 +57,9 @@ Report displayed        Artifacts saved to disk      AI executes test on device
 | `cli` | User-facing. Handles I/O, config, orchestration. Should not know about gRPC or LLM internals. |
 | `goal-executor` | The AI loop is complex enough to deserve isolation. It could theoretically be swapped for a different execution strategy. |
 | `device-node` | Platform-specific (Android/iOS) device code. Isolates gRPC, ADB, and driver concerns from business logic. |
-| `report-web` | Optional Next.js frontend. The CLI has a built-in server too, so this is an enhancement, not a dependency. |
+| `cloud-core` | Pure cloud-submission logic kept free of CLI I/O, so it can be bundled into the compiled CLI binary. |
+| `local-runtime` | Builds the per-platform runtime asset tarball (driver APKs/iOS zips, gRPC proto, report SPA dist) the compiled CLI needs at runtime. |
+| `report-web` | React SPA (Vite) frontend that the CLI's report server serves. Its Vite bundle is copied into `cli/dist/report-app` at build time (`copyReportApp.mjs`) and into the runtime tarball (`buildRuntimeTarball.mjs`) — both builds fail without it, so it is a build-time dependency of the CLI, not an optional alternative. |
 
 ---
 
@@ -188,7 +192,7 @@ finalrun doctor                  Check host readiness
 finalrun test auth/login.yaml --env staging --platform android --model openai/gpt-5.4-mini
 ```
 
-**What happens in `runTestCommand()` (bin/finalrun.ts:271-350):**
+**What happens in `runTestCommand()` (bin/finalrun.ts:372-485):**
 
 ```text
 1. normalizeTestSelectors()     Split comma-separated selectors, trim whitespace
@@ -214,7 +218,7 @@ finalrun test auth/login.yaml --env staging --platform android --model openai/gp
 
 ## 4. Phase 1: Validation (`runCheck`)
 
-**File:** `packages/cli/src/checkRunner.ts`
+**File:** `packages/common/src/checkRunner.ts`
 
 Before touching any device, FinalRun validates everything:
 
@@ -675,10 +679,10 @@ Then `rebuildRunIndex()` scans all run directories and regenerates `runs.json` �
 
 FinalRun has two ways to display reports:
 
-| | Built-in Server (`cli`) | Next.js App (`report-web`) |
+| | Built-in Server (`cli`) | React SPA (`report-web`) |
 |---|---|---|
 | **File** | `packages/cli/src/reportServer.ts` | `packages/report-web/` |
-| **Technology** | Raw `http.createServer()` | Next.js App Router |
+| **Technology** | Raw `http.createServer()` | Vite + React SPA |
 | **When used** | Default (`finalrun start-server`) | Development or custom deploy |
 | **Routes** | Same | Same |
 
@@ -1093,31 +1097,41 @@ Quick reference: where to find what.
 | `TestDefinition.ts` | `TestDefinition`, `BindingReference` | What a test looks like after YAML parsing |
 | `TestResult.ts` | `TestResult`, `AgentAction`, `FirstFailure`, `TestStatus` | What a test result looks like after execution |
 | `SuiteDefinition.ts` | `SuiteDefinition` | What a suite looks like after YAML parsing |
-| `DeviceAction.ts` | `TapAction`, `EnterTextAction`, `ScrollAbsAction`, ... (18 types) | All possible device actions |
+| `DeviceAction.ts` | `TapAction`, `EnterTextAction`, `ScrollAbsAction`, ... (22 concrete action classes) | All possible device actions |
 | `Environment.ts` | `AppConfig`, `EnvironmentConfig`, `RuntimeBindings` | Environment and binding types |
 | `Trace.ts` | `AgentActionTrace`, `TraceSpan`, `TimingInfo` | Performance tracing types |
 | `Hierarchy.ts` | `Hierarchy`, `HierarchyNode` | UI element tree from device |
+
+### `packages/common/src/` (non-model modules)
+
+| File | What it does | Key functions |
+|------|-------------|---------------|
+| `checkRunner.ts` | Validation phase | `runCheck()` |
+| `testLoader.ts` | YAML file parsing | `loadTest()`, `loadTestSuite()`, `loadEnvironmentConfig()` |
+| `testSelection.ts` | Test file discovery | `selectTestFiles()`, `expandSelector()` |
+| `workspace.ts` | Workspace discovery | `resolveWorkspace()`, `loadWorkspaceConfig()` |
+| `appConfig.ts` | App configuration | `resolveAppConfig()` |
+| `env.ts` | Environment variables | `CliEnv` |
+| `constants.ts` | Shared constants, model string parsing | `parseModel()`, `parseReasoningLevel()` |
+
+### `packages/cli/bin/`
+
+| File | What it does | Key functions |
+|------|-------------|---------------|
+| `finalrun.ts` | CLI entry point, command definitions | `runTestCommand()` |
 
 ### `packages/cli/src/`
 
 | File | What it does | Key functions |
 |------|-------------|---------------|
-| `bin/finalrun.ts` | CLI entry point, command definitions | `runTestCommand()` |
 | `testRunner.ts` | Main test orchestrator | `runTests()` |
-| `checkRunner.ts` | Validation phase | `runCheck()` |
 | `sessionRunner.ts` | Device setup + test execution | `prepareTestSession()`, `executeTestOnSession()` |
-| `testLoader.ts` | YAML file parsing | `loadTest()`, `loadTestSuite()`, `loadEnvironmentConfig()` |
-| `testSelection.ts` | Test file discovery | `selectTestFiles()`, `expandSelector()` |
 | `testCompiler.ts` | Test → AI prompt | `compileTestObjective()` |
-| `workspace.ts` | Workspace discovery | `resolveWorkspace()`, `loadWorkspaceConfig()` |
-| `appConfig.ts` | App configuration | `resolveAppConfig()` |
-| `env.ts` | Environment variables | `CliEnv`, `parseModel()`, `resolveApiKey()` |
+| `apiKey.ts` | API key resolution | `resolveApiKey()` |
 | `reportWriter.ts` | Artifact writing | `ReportWriter` class |
 | `runIndex.ts` | Run index management | `rebuildRunIndex()`, `loadRunIndex()` |
 | `reportServer.ts` | Built-in HTTP server | `serveReportWorkspace()` |
 | `reportServerManager.ts` | Server lifecycle | `startOrReuseWorkspaceReportServer()` |
-| `reportTemplate.ts` | Run detail HTML | `renderHtmlReport()` |
-| `reportIndexTemplate.ts` | Run index HTML | `renderRunIndexHtml()` |
 | `hostPreflight.ts` | SDK checks | `runHostPreflight()` |
 
 ### `packages/goal-executor/src/`
