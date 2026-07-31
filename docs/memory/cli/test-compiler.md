@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "compileTestObjective (packages/cli/src/testCompiler.ts) and the secret-value exposure chain it anchors: only `${variables.*}` is substituted, so the compile-time guarantee covers the compiled objective alone — once typed, a resolved secret reaches the provider through the captured hierarchy and screenshots. Prompt text is redacted per input at the AIAgent seam when runtime bindings are wired; screenshots, app-rendered transformations of a value, and INFO planner output are not."
+description: "compileTestObjective (packages/cli/src/testCompiler.ts) and the secret-value exposure chain it anchors: only `${variables.*}` is substituted, so the compile-time guarantee covers the compiled objective alone — once typed, a resolved secret reaches the provider through the captured hierarchy and screenshots. Prompt text is redacted per input at the AIAgent seam when runtime bindings are wired; screenshots, app-rendered values, sub-3-char secret values, and INFO planner output are not."
 ---
 # Test Objective Compilation (cli)
 
@@ -60,9 +60,12 @@ hierarchy and screenshot status above (the span detail logs the unresolved `rawD
 `AIAgent` (`packages/goal-executor/src/ai/AIAgent.ts`) accepts optional `bindings: RuntimeBindings`,
 wired from `createSessionExecutor` (`packages/cli/src/sessionRunner.ts`) as
 `config.runtimeBindings`. When bindings are present, `_buildPlannerPrompt` and
-`_buildGrounderPrompt` MUST replace exact occurrences of resolved secret values with their
-`${secrets.KEY}` placeholder — via `redactResolvedValue` from `@finalrun/common`, whose
-longest-value-first alternation is reused rather than reimplemented — applying it:
+`_buildGrounderPrompt` MUST replace occurrences of resolved secret values with their
+`${secrets.KEY}` placeholder — via `redactResolvedValue` from `@finalrun/common`, whose matching
+semantics are reused rather than reimplemented, and whose bounds the prompt path therefore inherits
+in full: unanchored longest-value-first matching, an existing placeholder token consumed whole rather
+than rewritten, and no redaction of a value shorter than `MIN_REDACTABLE_SECRET_LENGTH` (3)
+([/common/repo-placeholders.md](/common/repo-placeholders.md)). Redaction applies:
 
 - to every free-text input individually (`testObjective`, `act`, `history`, each `remember` entry,
   `preContext`, `appKnowledge`);
@@ -77,8 +80,10 @@ only serialized copies are rewritten — so index-based grounding (`flattenedHie
 → tap point) still resolves against the real on-screen values. Absent bindings, every path is a
 strict no-op and prompt assembly is byte-identical.
 
-Seven tests in `packages/goal-executor/src/ai/test/AIAgent.test.ts` pin this, including one for each
-failure mode a pass over assembled text would introduce (see Design Decisions).
+The "Prompt-path secret redaction" block in `packages/goal-executor/src/ai/test/AIAgent.test.ts` pins
+this behaviour case by case, including one test for each failure mode a pass over assembled text would
+introduce (see Design Decisions) and one for each way unanchored value matching can corrupt prompt
+text rather than protect it.
 
 #### Scenario: the typed field is redacted and still locatable
 - **GIVEN** bindings `{ secrets: { PASSWORD: 'hunter2-secret' } }` and a captured hierarchy whose
@@ -94,6 +99,19 @@ failure mode a pass over assembled text would introduce (see Design Decisions).
 - **THEN** the emitted `ui_elements` still parses as JSON, `bounds` is `[0, 0, 1080, 240]`, and only
   the field whose string value equals the secret becomes `${secrets.PIN}`
 
+#### Scenario: the objective's own placeholder token survives its value's redaction
+- **GIVEN** bindings `{ secrets: { PASSWORD: 'PASSWORD' } }` and a `testObjective` reading
+  `Type ${secrets.PASSWORD} into the field, then type PASSWORD again`
+- **WHEN** the planner prompt is built
+- **THEN** the prompt carries `Type ${secrets.PASSWORD} into the field, then type ${secrets.PASSWORD}
+  again` and never a nested `${secrets.${secrets.PASSWORD}}` token
+
+#### Scenario: a secret value too short to redact leaves the prompt untouched
+- **GIVEN** bindings `{ secrets: { TOKEN: 's' } }` and any planner request
+- **WHEN** the planner prompt is built
+- **THEN** the assembled text is byte-identical to a bindings-less agent's assembly of the same
+  request — the value reaches the provider raw rather than mangling every `s` in the prompt
+
 ### Requirement: Residual exposure is stated, not closed
 Prompts, provider-side logs and report artifacts MUST still be treated as secret-bearing. What
 remains exposed after prompt-text redaction:
@@ -103,6 +121,11 @@ remains exposed after prompt-text redaction:
   field-region detection; dropping them would blind the planner.
 - **App-rendered transformations** — a value the app truncates, reformats or partially masks is no
   longer an exact match and passes through.
+- **Secret values shorter than three characters** — never redacted anywhere, so they reach the
+  provider (and the report, and spans) raw. The trade is deliberate: substituting a 1–2 character
+  value rewrites every incidental occurrence of that character sequence and turns the prompt into
+  garbage, which corrupts model input rather than protecting anything
+  ([/common/repo-placeholders.md](/common/repo-placeholders.md)).
 - **Structural strings** — exact matching also rewrites an element's `id`, `class` or `contentDesc`
   when its content equals a secret value. That degrades the text the grounder reads; it cannot
   corrupt the emitted JSON, because `index` and `bounds` are non-string fields.
