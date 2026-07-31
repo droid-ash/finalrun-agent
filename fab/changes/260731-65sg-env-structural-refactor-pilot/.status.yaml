@@ -1,0 +1,53 @@
+id: 65sg
+name: 260731-65sg-env-structural-refactor-pilot
+created: 2026-07-31T06:01:02Z
+created_by: ashish-noon
+change_type: refactor
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: done
+    review-pr: done
+plan:
+    generated: true
+    task_count: 7
+    acceptance_count: 12
+    acceptance_completed: 12
+confidence:
+    certain: 6
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 4.9
+    fuzzy: true
+    dimensions:
+        signal: 85.0
+        reversibility: 85.0
+        competence: 90.0
+        disambiguation: 80.0
+stage_metrics:
+    intake: {started_at: "2026-07-31T06:01:02Z", driver: fab-new, iterations: 1, completed_at: "2026-07-31T06:07:34Z"}
+    apply: {started_at: "2026-07-31T06:07:34Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:15:55Z"}
+    review: {started_at: "2026-07-31T06:15:55Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:26:47Z"}
+    hydrate: {started_at: "2026-07-31T06:26:47Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:32:26Z"}
+    ship: {started_at: "2026-07-31T06:32:26Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T06:34:23Z"}
+    review-pr: {started_at: "2026-07-31T06:34:23Z", driver: git-pr, iterations: 1, completed_at: "2026-07-31T06:50:11Z"}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/172
+change_type_source: explicit
+true_impact:
+    added: 589
+    deleted: 27
+    net: 562
+    tests:
+        added: 57
+        deleted: 0
+        net: 57
+    computed_at: "2026-07-31T06:34:23Z"
+    computed_at_stage: ship
+summary: moves reasoning-level validation to constants.ts beside REASONING_LEVELS, keeps env.ts's re-export block as a compatibility shim, and pins CliEnv's getRequired/includeDotEnv traps with new tests
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-31T06:50:11Z

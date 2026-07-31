@@ -170,3 +170,60 @@ test('parseReasoningLevel rejects unknown values with a labeled error', () => {
     /config\.yaml reasoning has invalid value "extreme"\. Allowed values: minimal, low, medium, high\./,
   );
 });
+
+// Pinning tests appended by change 260731-65sg (env structural refactor pilot).
+// They pin behavior the pre-existing suite left uncovered, so the refactor's
+// no-behavior-change invariant is checked by tests rather than by inspection.
+
+test('CliEnv.getRequired throws when the key is absent', () => {
+  const env = new CliEnv();
+  env.load(undefined, { includeDotEnv: false, processEnv: {} });
+  assert.throws(
+    () => env.getRequired('NOT_SET'),
+    /^Error: Missing required environment variable: NOT_SET$/,
+  );
+});
+
+test('CliEnv.getRequired treats an empty-string value as missing', () => {
+  // Pins the falsy check (`if (!value)`) — an empty string throws exactly
+  // like an absent key, rather than being returned.
+  const env = new CliEnv();
+  env.load(undefined, { includeDotEnv: false, processEnv: { EMPTY: '' } });
+  assert.equal(env.get('EMPTY'), '');
+  assert.throws(
+    () => env.getRequired('EMPTY'),
+    /^Error: Missing required environment variable: EMPTY$/,
+  );
+});
+
+test('CliEnv.getRequired returns a present non-empty value', () => {
+  const env = new CliEnv();
+  env.load(undefined, { includeDotEnv: false, processEnv: { PRESENT: 'value' } });
+  assert.equal(env.getRequired('PRESENT'), 'value');
+});
+
+test('CliEnv.load: explicitly passing includeDotEnv undefined still loads .env files', () => {
+  // Pins the `options?.includeDotEnv !== false` default — only a literal
+  // `false` opts out; an explicit `undefined` behaves like the default.
+  const dir = createTempDotEnvDir({
+    '.env.dev': 'ONLY_DEV=dev-value\n',
+    '.env': 'ONLY_PLAIN=plain-value\n',
+  });
+
+  try {
+    const env = new CliEnv();
+    env.load('dev', { includeDotEnv: undefined, cwd: dir, processEnv: {} });
+    assert.equal(env.get('ONLY_DEV'), 'dev-value');
+    assert.equal(env.get('ONLY_PLAIN'), 'plain-value');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CliEnv.set followed by get round-trips a programmatic value', () => {
+  const env = new CliEnv();
+  env.load(undefined, { includeDotEnv: false, processEnv: {} });
+  env.set('FROM_CLI', 'cli-value');
+  assert.equal(env.get('FROM_CLI'), 'cli-value');
+  assert.equal(env.getRequired('FROM_CLI'), 'cli-value');
+});

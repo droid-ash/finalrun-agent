@@ -15,7 +15,7 @@ import {
 import type { AppConfig } from './models/Environment.js';
 import YAML from 'yaml';
 import { readAppConfig } from './appConfig.js';
-import { parseReasoningLevel } from './env.js';
+import { parseReasoningLevel } from './constants.js';
 import { promptForWorkspaceSelection, type WorkspaceSelectionIO } from './workspacePicker.js';
 
 function resolveFinalRunRootDir(): string {
