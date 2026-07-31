@@ -1,5 +1,14 @@
 import type { TestDefinition, RuntimeBindings } from '@finalrun/common';
 
+// Secret-leak guard: this pattern deliberately matches ONLY ${variables.*}
+// tokens, never ${secrets.*}. Secret placeholders are left as literal tokens in
+// the compiled prompt — the Execution Rules appended below instruct the model to
+// echo them verbatim — so secret VALUES never enter the LLM prompt, the model
+// provider's logs, or compiled test artifacts. Secrets are substituted only
+// downstream at the point of use (resolveRuntimePlaceholders in
+// packages/common/src/repoPlaceholders.ts, called from ActionExecutor when
+// typing or opening a deeplink). Widening this pattern to secrets would leak
+// their values into every plan/grounder call.
 const VARIABLE_REFERENCE_PATTERN = /\$\{variables\.([A-Za-z0-9_-]+)\}/g;
 
 export function compileTestObjective(

@@ -59,7 +59,6 @@ export class VisualGrounder {
 
       const output = response.output;
 
-      // Check for x,y coordinates
       if (typeof output['x'] === 'number' && typeof output['y'] === 'number') {
         Logger.i(
           `Visual grounding succeeded: (${output['x']}, ${output['y']}) — ${output['reason']}`,
@@ -74,7 +73,6 @@ export class VisualGrounder {
         };
       }
 
-      // Check for error
       if (output['isError']) {
         Logger.w(`Visual grounding failed: ${output['reason']}`);
         return {

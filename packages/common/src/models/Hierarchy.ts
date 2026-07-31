@@ -85,9 +85,6 @@ export class HierarchyNode {
     return lower.includes('button') || lower.includes('clickable');
   }
 
-  /**
-   * Get the center point of this node's bounds.
-   */
   getCenterPoint(): { x: number; y: number } | null {
     if (!this.bounds) return null;
     const [left, top, right, bottom] = this.bounds;
@@ -121,7 +118,7 @@ export class Hierarchy {
   }
 
   /**
-   * Parse a hierarchy from the JSON string returned by the driver.
+   * Parse a hierarchy from the driver's already-parsed JSON object.
    * Dart: factory Hierarchy.fromJson(Map<String, dynamic> json)
    */
   static fromJson(json: Record<string, unknown>): Hierarchy {
@@ -129,9 +126,6 @@ export class Hierarchy {
     return new Hierarchy(root.node);
   }
 
-  /**
-   * Parse hierarchy from the raw JSON string.
-   */
   static fromJsonString(jsonString: string): Hierarchy {
     try {
       const parsed = JSON.parse(jsonString) as unknown;
@@ -300,9 +294,6 @@ export class Hierarchy {
     return { node, nextIndex: currentIndex };
   }
 
-  /**
-   * Flatten a node and all its descendants into a list.
-   */
   private static _flattenNode(
     node: HierarchyNode,
     result: HierarchyNode[],

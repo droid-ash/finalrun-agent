@@ -96,7 +96,6 @@ export async function submitRun(input: SubmitRunInput): Promise<SubmitRunResult>
   try {
     const filesToZip = collectFilesToZip(input);
 
-    // Create zip with only selected files
     Logger.i(`Zipping ${filesToZip.length} file(s)...`);
     const zipPath = writeSpecZip(filesToZip);
 
@@ -152,7 +151,6 @@ function resolveAppMode(input: SubmitRunInput): AppMode {
   return { type: 'server-default' };
 }
 
-// Collect resolved file paths
 function collectFilesToZip(input: SubmitRunInput): FileToZip[] {
   const filesToZip: FileToZip[] = [];
 

@@ -42,7 +42,6 @@ export class DeviceNode {
     this._simctlClient = new SimctlClient();
   }
 
-  /** Get the singleton instance. */
   static getInstance(): DeviceNode {
     if (!DeviceNode._instance) {
       DeviceNode._instance = new DeviceNode();

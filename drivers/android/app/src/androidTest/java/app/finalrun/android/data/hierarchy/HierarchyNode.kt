@@ -38,7 +38,6 @@ class HierarchyNode {
         val unmatchedProperties = mutableListOf<String>()
 
         for (property in priorityList) {
-            // Filter by the current property in the priority list if there are remaining matches
             currentMatches = when (property) {
                 ID -> if (nodeAttr.id != null && currentMatches.isNotEmpty()) {
                     currentMatches.filter { it.id == nodeAttr.id }.also {
@@ -74,11 +73,9 @@ class HierarchyNode {
                 else -> currentMatches  // Ignore unknown properties
             }
 
-            // Break early if we reach a full match
             if (currentMatches.size == 1) break
         }
 
-        // Return the result with matched and unmatched properties
         return NodeMatchResult(
             matchingNode = currentMatches.firstOrNull(),
             matchingNodes = currentMatches,
@@ -89,13 +86,11 @@ class HierarchyNode {
 
     fun getMatchingNodeWithResult(nodeIdentifier: NodeIdentifier?): NodeMatchResult? {
         if (nodeIdentifier == null) return null
-        //If nodeIdentifier is uniquely identifiable
         if (nodeIdentifier.isUniquelyIdentifiable()) {
             val nodeAttr = nodeIdentifier.srcNodeAttr ?: return null
             val nodeMatchResult = findBestMatch(flattenedNode, nodeAttr)
             return nodeMatchResult
         } else {
-            //If nodeIdentifier is not uniquely identifiable
             val srcNodeAttr = nodeIdentifier.srcNodeAttr
             val dstNodeAttr = nodeIdentifier.dstNodeAttr
             if (srcNodeAttr == null || dstNodeAttr == null) return null

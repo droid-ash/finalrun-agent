@@ -67,13 +67,11 @@ class XCTestManager {
         var success = false
         var message = ""
         
-        // Map key strings to XCUIDevice button presses
         switch keyString {
         case "home":
             XCUIDevice.shared.press(.home)
             success = true
         case "lock":
-            // Lock the device
             XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
             success = true
         case "enter", "return":
@@ -89,7 +87,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "delete", "backspace":
-            // For delete key
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.delete.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -101,7 +98,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "tab":
-            // For tab key
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.tab.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -113,7 +109,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "escape", "esc":
-            // For escape key
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.escape.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -125,7 +120,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "up", "uparrow", "remote_up":
-            // For up arrow
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.upArrow.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -137,7 +131,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "down", "downarrow", "remote_down":
-            // For down arrow
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.downArrow.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -149,7 +142,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "left", "leftarrow", "remote_left":
-            // For left arrow
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.leftArrow.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -161,7 +153,6 @@ class XCTestManager {
             }
             return // Early return since we're handling async
         case "right", "rightarrow", "remote_right":
-            // For right arrow
             var eventPath = PointerEventPath.pathForTextInput()
             eventPath.typeKey(XCUIKeyboardKey.rightArrow.rawValue)
             let eventRecord = EventRecord(orientation: .portrait)
@@ -177,7 +168,6 @@ class XCTestManager {
             message = "Unsupported key: \(keyString)"
         }
         
-        // Send response for non-keyboard keys
         if !message.isEmpty {
             print("PressKey error: \(message)")
         }
@@ -193,10 +183,8 @@ class XCTestManager {
     }
     
     func getDeviceScale(_ deviceScale: GetDeviceScaleAction) {
-        // Get the device scale from UIScreen
         let scale = UIScreen.main.scale
-        
-        // Create response data with scale
+
         let responseData = ActionResponseData(
             type: deviceScale.type,
             screenshot: nil,
@@ -209,7 +197,6 @@ class XCTestManager {
             scale: Float(scale)
         )
         
-        // Create and send the response
         let testResponse = ActionResponse(
             requestId: deviceScale.requestId,
             type: deviceScale.type,
@@ -262,7 +249,6 @@ class XCTestManager {
                     }
                 }
             } else {
-                // Just enter the text without clearing
                 print("Entering: \(enterTextValue)")
                 TextInputHelper.inputText(enterTextValue) { [weak self] success in
                     DispatchQueue.main.async {

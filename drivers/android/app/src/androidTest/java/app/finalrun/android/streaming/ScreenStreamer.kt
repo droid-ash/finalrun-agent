@@ -28,12 +28,10 @@ object ScreenStreamer {
     private var isStreamingActive = false
 
     fun startStreaming(webSocket: WebSocket, frameDelay: Long, quality: Int) {
-        // 7. Keep startup cleanup - ensure clean state
         stopStreaming()
         isStreamingActive = true
         
         streamingScope.launch {
-            // Only proceed if still active after warm-up
             if (!isStreamingActive || !isActive) {
                 debugLog("startStreaming: Cancelled before starting main loop")
                 return@launch
@@ -45,7 +43,6 @@ object ScreenStreamer {
 
             debugLog("startStreaming: Starting main streaming loop with frameDelay: ${frameDelay}ms")
 
-            // Main streaming loop
             while (isStreamingActive && isActive) {
                 try {
                     val screenWidth = getScreenWidth()
@@ -63,7 +60,6 @@ object ScreenStreamer {
                     }
 
 //                    val screenshot = Base64.encodeToString(screenShotByteArray, Base64.NO_WRAP)
-                    // Compute the current screenshot hash and compare to the last sent hash
                     val currentScreenshotHash = screenShotByteArray.contentHashCode()
                     // If screenshot hasn't changed since last frame, skip rebuilding hierarchy
                     if (currentScreenshotHash == lastScreenshotHash) {
@@ -97,7 +93,6 @@ object ScreenStreamer {
                         lastHierarchyFrameMessage = hierarchyJson
                     }
 
-                    // Update last sent values
                     lastScreenshotHash = currentScreenshotHash
                     lastHierarchyNode = currentHierarchyNode
 
@@ -143,7 +138,9 @@ object ScreenStreamer {
     fun stopStreaming() {
         try {
             debugLog("ScreenStreamer: Stopping streaming...")
-            // 2. Make warm-up cancelable - set flag first
+            // The flag must go false BEFORE cancelChildren(): a coroutine already
+            // launched by startStreaming but not yet past its isStreamingActive
+            // guard then bails out there instead of entering the streaming loop.
             isStreamingActive = false
             streamingScope.coroutineContext.cancelChildren()
             // Add a small delay to ensure coroutines are fully cancelled

@@ -1032,7 +1032,7 @@ export class AdbClient {
     });
   }
 
-  /** Return a port to the pool. Called from removePortForward. */
+  /** Return a port to the pool. */
   private async _releasePort(deviceSerial: string): Promise<void> {
     await this._withAllocationLock(async () => {
       const port = this._portMap.get(deviceSerial);

@@ -3,11 +3,11 @@ name: Drivers
 # Compile gate for the two native drivers under drivers/ — the only automated
 # verification they have. Before this workflow existed, nothing in
 # .github/workflows/ mentioned gradle, xcodebuild, Kotlin or Swift: a bad edit
-# to the 48 native files was caught by a dead device in someone's manual
+# to the 44 native files was caught by a dead device in someone's manual
 # session, not by a failing check.
 #
 # COMPILE ONLY — deliberately no test execution:
-#   - drivers/android/app/src/androidTest/ IS the driver (24 of 25 Kotlin
+#   - drivers/android/app/src/androidTest/ IS the driver (23 of 24 Kotlin
 #     files). Its single @Test starts a gRPC server and blocks forever, and
 #     there are zero assertions in the whole tree, so `connectedAndroidTest`
 #     has nothing to report and would never terminate.

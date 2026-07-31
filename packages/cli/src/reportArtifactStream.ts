@@ -59,6 +59,12 @@ export async function serveArtifactHttp(params: {
 
   let stats;
   try {
+    // Symlink containment re-check: resolveArtifactPath above is purely lexical,
+    // so a symlink INSIDE the artifacts directory that points OUTSIDE it still
+    // passes that check. Re-verifying containment on the realpath of both the
+    // root and the resolved path rejects such links, preventing arbitrary file
+    // disclosure over the report HTTP stream. Do not drop this in favor of the
+    // lexical check alone.
     const artifactsRoot = await fsp.realpath(artifactsDir);
     const realResolvedPath = await fsp.realpath(resolvedPath);
     const relativeToRoot = path.relative(artifactsRoot, realResolvedPath);

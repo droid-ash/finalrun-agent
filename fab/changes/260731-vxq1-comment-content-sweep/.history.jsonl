@@ -1,0 +1,18 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-31T02:58:57Z"}
+{"args":"Sweep comment content across the codebase under the merged comment policy (PR #169): remove restatement comments per the deletion test applied per claim (re-derive the real count, ~146 unverified), document four undocumented security controls (testCompiler.ts secrets-vs-variables, reportArtifactStream.ts symlink guard, repoPlaceholders.ts substring leak guard, DeviceActions.kt command-injection blocklist), fix ~10 factually wrong comments verifying each against code. Rationale exempt, CI/workflow files exempt, comments only — no runtime changes.","cmd":"fab-new","event":"command","ts":"2026-07-31T02:58:57Z"}
+{"delta":"+4.8","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-31T03:01:09Z"}
+{"delta":"+0.0","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-31T03:04:02Z"}
+{"delta":"+0.0","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-31T03:06:48Z"}
+{"delta":"+0.0","event":"confidence","score":4.8,"trigger":"calc-score","ts":"2026-07-31T03:07:27Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-31T03:07:47Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T03:07:53Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T03:09:00Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T03:33:41Z"}
+{"event":"review","result":"failed","ts":"2026-07-31T03:47:11Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T03:47:11Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T03:53:17Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T03:54:00Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-31T04:05:59Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T04:05:59Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T04:06:42Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-31T04:11:25Z"}

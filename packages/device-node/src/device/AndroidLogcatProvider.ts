@@ -46,7 +46,6 @@ export class AndroidLogcatProvider implements LogCaptureProvider {
     appIdentifier?: string;
   }): Promise<{ process: ChildProcess; response: DeviceNodeResponse }> {
     try {
-      // Clear the logcat ring buffer before capture
       await this._execFileFn(this._adbPath, ['-s', params.deviceId, 'logcat', '-c']);
       Logger.i(
         `AndroidLogcatProvider: Cleared logcat ring buffer for device ${params.deviceId}`,

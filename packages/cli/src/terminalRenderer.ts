@@ -61,9 +61,6 @@ export class TerminalRenderer {
     }
   }
 
-  /**
-   * Print a summary of the goal execution result.
-   */
   printSummary(result: TestExecutionResult): void {
     console.log('\n' + '─'.repeat(50));
     console.log(
@@ -79,9 +76,6 @@ export class TerminalRenderer {
     console.log('─'.repeat(50));
   }
 
-  /**
-   * Show a spinner with a message.
-   */
   private _showSpinner(message: string): void {
     this._stopSpinner();
     this._currentMessage = message;
@@ -99,12 +93,10 @@ export class TerminalRenderer {
     if (this._spinnerInterval) {
       clearInterval(this._spinnerInterval);
       this._spinnerInterval = null;
-      // Clear the spinner line
       process.stdout.write('\r' + ' '.repeat(80) + '\r');
     }
   }
 
-  /** Clean up resources. */
   destroy(): void {
     this._stopSpinner();
   }

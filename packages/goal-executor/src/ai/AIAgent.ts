@@ -1,6 +1,5 @@
 // AIAgent.ts — Replaces FinalRunAgent.dart
 // Uses Vercel AI SDK for direct LLM calls instead of backend API.
-// Dart: FinalRunAgent → TypeScript: AIAgent
 
 import { generateText, Output } from 'ai';
 import {
@@ -206,9 +205,8 @@ export class AIAgent {
   private _defaults: ModelDefaults;
   private _features: FeatureOverrides;
 
-  // Cached prompt contents
   private _promptCache: Map<string, string> = new Map();
-  // Cached Vercel AI SDK clients, keyed by provider
+  // Cached Vercel AI SDK clients, keyed by provider/model
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _clientCache: Map<string, any> = new Map();
 

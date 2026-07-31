@@ -53,27 +53,23 @@ object DeviceActions {
     private const val DATA_TYPE_INTEGER = "Integer"
 
     const val DEFAULT_QUALITY = 5
-    const val SCREENSHOT_SCALE = 0.7f // Scale to 50% to improve performance
+    const val SCREENSHOT_SCALE = 0.7f // Scaled down to improve performance
     private const val FINAL_RUN_ANDROID = "app.finalrun.android"
     private const val FINAL_RUN_ANDROID_TEST = "app.finalrun.android.test"
 
     //Default values for scroll action
-    //For Scroll Down
     internal const val SCROLL_DOWN_X = 60
     internal const val SCROLL_DOWN_FROM = 60
     internal const val SCROLL_DOWN_TO = 10
 
-    //For Scroll Up
     internal const val SCROLL_UP_X = 60
     internal const val SCROLL_UP_FROM = 20
     internal const val SCROLL_UP_TO = 90
 
-    //For Scroll Right
     internal const val SCROLL_RIGHT_Y = 60
     internal const val SCROLL_RIGHT_FROM = 90
     internal const val SCROLL_RIGHT_TO = 10
 
-    //For Scroll Left
     internal const val SCROLL_LEFT_Y = 60
     internal const val SCROLL_LEFT_FROM = 10
     internal const val SCROLL_LEFT_TO = 90
@@ -95,19 +91,16 @@ object DeviceActions {
         val jsonArray = JSONArray()
         for (resolveInfo in apps) {
             val pkgName = resolveInfo.activityInfo.packageName
-            // skip your own app & test APK
             if (pkgName == FINAL_RUN_ANDROID || pkgName == FINAL_RUN_ANDROID_TEST) continue
 
             val label = resolveInfo.activityInfo.loadLabel(pm).toString()
 
-            // Safe-fetch versionName
             val version = try {
                 val info = pm.getPackageInfo(pkgName, 0)
                 info.versionName
             } catch (_: PackageManager.NameNotFoundException) {
             }
 
-            // Build JSON
             val jsonObjApp = JSONObject().apply {
                 put(NAME, label)
                 put(PACKAGE_NAME, pkgName)
@@ -119,7 +112,7 @@ object DeviceActions {
     }
 
     /**
-     * Returns the Base64 of the screenshot, taken via instrumentation test
+     * Returns the JPEG bytes of the screenshot, taken via instrumentation test
      */
     fun getScreenshotInByteArray(quality: Int = DEFAULT_QUALITY, scale: Float = SCREENSHOT_SCALE): ByteArray? {
         try {
@@ -166,8 +159,7 @@ object DeviceActions {
     }
 
     /**
-     * Scales down a bitmap by the given scale factor
-     * @param bitmap The original bitmap
+     * Scales the bitmap down to shrink screenshot payloads before encoding
      * @param scale Scale factor (e.g., 0.5 = 50% size)
      * @return Scaled bitmap (or original if scale >= 1.0)
      */
@@ -186,7 +178,6 @@ object DeviceActions {
 
     private fun convertBitmapToByteArray(bitmap: Bitmap, quality: Int): ByteArray {
         val stream = ByteArrayOutputStream()
-        // 6. Ensure quality is in valid range (0-100)
         val normalizedQuality = quality.coerceIn(0, 100)
         bitmap.compress(Bitmap.CompressFormat.JPEG, normalizedQuality, stream)
         return stream.toByteArray()
@@ -233,6 +224,19 @@ object DeviceActions {
     fun enterText(text: String, shouldClearText: Boolean, eraseCount: Int) {
         if (shouldClearText) clearTextFromFocusNode(eraseCount)
 
+        // Command-injection guard: the fast path below interpolates the text into
+        // an ADB shell command line ("input text ..."), so it is taken only when
+        // every character is plain ASCII (code < 128) and none is a shell
+        // metacharacter. Without this gate, test-controlled text containing `;`,
+        // `$(...)`, backticks or quotes could be reinterpreted as command syntax
+        // rather than typed literally (how much of that syntax is honored depends
+        // on how the platform executes the command string — do not assume a full
+        // shell, and do not assume its absence). The gate narrows the injection
+        // surface rather than closing it: ASCII control characters such as
+        // newline and carriage return pass both checks. Text the gate rejects
+        // takes the clipboard-paste path, which never puts the text on a shell
+        // command line — its only shell call is the fixed string
+        // "input keyevent 279".
         val shellMetachars = setOf('&', '|', ';', '<', '>', '$', '`', '\\', '"', '\'', '(', ')', '{', '}', '!', '#', '~', '*', '?', '[', ']')
         val isSafeForShell = text.all { it.code < 128 && it !in shellMetachars }
         if (isSafeForShell) {
@@ -488,7 +492,7 @@ object DeviceActions {
                     locMgr.setTestProviderLocation(LocationManager.GPS_PROVIDER, newLocation)
 
                     postLocation()
-                }, 1000) // 1 second delay between updates
+                }, 1000)
             }
 
             postLocation()
@@ -503,7 +507,6 @@ object DeviceActions {
     fun pressBackButton() = uiDevice.pressBack()
 
     fun waitForAppLaunch(targetPackage: String, timeoutMs: Long): Boolean {
-        // Wait until an object from the target package is present in the UI hierarchy
         return uiDevice.wait(Until.hasObject(By.pkg(targetPackage).depth(0)), timeoutMs)
     }
 
@@ -624,19 +627,16 @@ object DeviceActions {
 
     fun resetLocation() {
         try {
-            // Cancel any pending location updates
             geoHandler.removeCallbacksAndMessages(null)
 
             // Reset location counter to invalidate any running updates
             locationCounter++
 
-            // Get location manager
             val locMgr = InstrumentationRegistry.getInstrumentation()
                 .context
                 .getSystemService(LOCATION_SERVICE) as LocationManager
 
             try {
-                // Disable and remove the test provider
                 locMgr.setTestProviderEnabled(LocationManager.GPS_PROVIDER, false)
                 locMgr.removeTestProvider(LocationManager.GPS_PROVIDER)
             } catch (e: Exception) {

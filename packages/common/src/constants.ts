@@ -1,5 +1,5 @@
-// Port of constants/lib/constants.dart — ONLY the CLI-relevant subset.
-// The Dart file has 358 lines; we carry over ~30% used by CLI + goal-executor + device-node.
+// Port of constants/lib/constants.dart — only the subset used by
+// CLI + goal-executor + device-node.
 
 // ============================================================================
 // Platform identifiers

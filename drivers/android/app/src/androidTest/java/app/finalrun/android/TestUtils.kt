@@ -47,9 +47,6 @@ fun getXYPercentOnScreen(xP: Double, yP: Double): Pair<Int, Int>? {
  * Frame Duration (in milliseconds)
  * Formula: (1 / Frame Rate) × 1000
  * (1 / 24) * 1000 = 41.6666
- * 
- * 4. Fix FPS calculation - ensure floating point division
- * Also adds bounds checking for safety
  */
 fun calculateFrameDelay(frameRate: Int): Long {
     // Ensure valid frame rate (1-60 fps reasonable range)
