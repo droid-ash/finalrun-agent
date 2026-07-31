@@ -106,7 +106,6 @@ class XCViewHierarchyManager {
         guard let jpegData = screenshot.image.jpegData(compressionQuality: CGFloat(Double(quality ?? 5)/100.0)) else {
             return
         }
-        // Convert PNG data to Base64 string
         let base64String = jpegData.base64EncodedString()
         guard app.state == .runningForeground else {
             return
@@ -199,7 +198,6 @@ class XCViewHierarchyManager {
         guard let jpegData = screenshot.image.jpegData(compressionQuality: CGFloat(Double(quality ?? 5)/100.0)) else {
             return
         }
-        // Convert jpeg data to Base64 string
         let base64String = jpegData.base64EncodedString()
         guard app.state == .runningForeground else {
             return
@@ -245,7 +243,6 @@ class XCViewHierarchyManager {
             print("Flattened Hierarchy JSON Encoding Error: \(error)")
         }
         let screenshot = XCUIScreen.main.screenshot()
-        // jpegData is of type Data, convert to byte array.
         guard let jpegData = screenshot.image.jpegData(compressionQuality: CGFloat(Double(startStreamingPayload.quality ?? 5)/100.0)) else {
             return
         }
@@ -302,12 +299,10 @@ class XCViewHierarchyManager {
             let xcViewElement = try self.getHierarchy(app)
             flattenedHierarchy = self.dfs(xcViewElement: xcViewElement, screenDimensions: screenDimensions)
             
-            // Add system-level alerts (permission dialogs) to the hierarchy
             if let systemAlerts = self.getSystemAlertHierarchy() {
                 flattenedHierarchy += self.dfs(xcViewElement: systemAlerts, screenDimensions: screenDimensions)
             }
             
-            // Add system-level overlays (sheets, popovers, modals) to the hierarchy
             let systemOverlays = self.getSystemOverlayHierarchy()
             for overlay in systemOverlays {
                 flattenedHierarchy += self.dfs(xcViewElement: overlay, screenDimensions: screenDimensions)
@@ -323,7 +318,6 @@ class XCViewHierarchyManager {
         
         // Check if current element should be filtered (using passed dimensions, no recalculation)
         if shouldFilterElement(hierarchy, screenWidth: screenDimensions.width, screenHeight: screenDimensions.height) {
-            // Skip this element and its children
             return []
         }
         
@@ -449,7 +443,6 @@ class XCViewHierarchyManager {
     /// Detects system-level alerts (like permission dialogs) that appear over apps
     /// These alerts belong to springboard/system, not the current app
     static private func getSystemAlertHierarchy() -> XCViewElement? {
-        // Check if springboard has any alerts (permission dialogs, system alerts, etc.)
         guard XCViewHierarchyManager.springboardApplication.alerts.firstMatch.exists else {
             return nil
         }
@@ -472,7 +465,6 @@ class XCViewHierarchyManager {
         var systemOverlays: [XCViewElement] = []
         let springboard = XCViewHierarchyManager.springboardApplication
         
-        // Check for system sheets
         if springboard.sheets.count > 0 {
             for i in 0..<springboard.sheets.count {
                 let sheet = springboard.sheets.element(boundBy: i)
@@ -529,17 +521,10 @@ class XCViewHierarchyManager {
     /// Checks if an element is completely outside the screen bounds
     private static func isElementOutOfBounds(_ bounds: XCBounds?, screenWidth: Int, screenHeight: Int) -> Bool {
         guard let bounds = bounds else { return true }
-        
-        // Element is completely to the left of screen
+
         if bounds.right ?? 0 <= 0 { return true }
-        
-        // Element is completely to the right of screen
         if bounds.left ?? 0 >= Double(screenWidth) { return true }
-        
-        // Element is completely above the screen
         if bounds.bottom ?? 0 <= 0 { return true }
-        
-        // Element is completely below the screen
         if bounds.top ?? 0 >= Double(screenHeight) { return true }
         
         return false
@@ -549,14 +534,11 @@ class XCViewHierarchyManager {
     private static func shouldFilterElement(_ hierarchy: XCViewHierarchy, screenWidth: Int, screenHeight: Int) -> Bool {
         guard let bounds = hierarchy.bounds else { return true }
         
-        // Calculate width and height
         let width = (bounds.right ?? 0) - (bounds.left ?? 0)
         let height = (bounds.bottom ?? 0) - (bounds.top ?? 0)
         
-        // Filter if width or height is <= 0
         if width <= 0 || height <= 0 { return true }
         
-        // Filter if element is out of bounds
         if isElementOutOfBounds(bounds, screenWidth: screenWidth, screenHeight: screenHeight) { return true }
         
         return false

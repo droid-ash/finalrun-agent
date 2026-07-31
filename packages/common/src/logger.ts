@@ -52,28 +52,24 @@ export class Logger {
     Logger._sinks.delete(sink);
   }
 
-  /** Debug log. */
   static d(message: string, ...args: unknown[]): void {
     if (Logger._level <= LogLevel.DEBUG) {
       Logger._emit(LogLevel.DEBUG, 'DEBUG', message, args, console.log);
     }
   }
 
-  /** Info log. */
   static i(message: string, ...args: unknown[]): void {
     if (Logger._level <= LogLevel.INFO) {
       Logger._emit(LogLevel.INFO, 'INFO', message, args, console.log);
     }
   }
 
-  /** Warning log. */
   static w(message: string, ...args: unknown[]): void {
     if (Logger._level <= LogLevel.WARN) {
       Logger._emit(LogLevel.WARN, 'WARN', `⚠ ${message}`, args, console.warn);
     }
   }
 
-  /** Error log. */
   static e(message: string, error?: unknown): void {
     if (Logger._level <= LogLevel.ERROR) {
       Logger._emit(LogLevel.ERROR, 'ERROR', `✖ ${message}`, error !== undefined ? [error] : [], console.error);

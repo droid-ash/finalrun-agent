@@ -40,8 +40,9 @@ final class AtomicFlag: @unchecked Sendable {
 
 /// gRPC Driver Server for iOS
 ///
-/// This server starts a gRPC service on the device, allowing the Dart client
-/// to send commands and receive responses over HTTP/2.
+/// This server starts a gRPC service on the device, allowing the TypeScript
+/// client (packages/device-node) to send commands and receive responses over
+/// HTTP/2.
 @available(iOS 18.0, *)
 @MainActor
 final class GrpcDriverServer {
@@ -57,19 +58,16 @@ final class GrpcDriverServer {
     func start() async throws {
         os_log("GrpcDriverServer: Creating transport on port %d...", log: serverLogger, type: .error, port)
         
-        // Create the transport
         let transport = HTTP2ServerTransport.Posix(
             address: .ipv4(host: "0.0.0.0", port: port),
             transportSecurity: .plaintext
         )
         
-        // Create the service implementation
         let service = DriverServiceImpl(
             testManager: testManager,
             viewHierarchyManager: viewHierarchyManager
         )
         
-        // Create and start the server
         let server = GRPCServer(
             transport: transport,
             services: [service]
@@ -160,7 +158,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
         return response
     }
 
-    /// Helper to log RPC request/response
     private nonisolated func logRpc(_ method: String, params: String = "", success: Bool? = nil) {
         if let success = success {
             os_log("RPC [%{public}@] -> success=%{public}@", log: serverLogger, type: .error, method, success ? "true" : "false")
@@ -188,7 +185,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
     }
     
     nonisolated func tapPercent(request: FRTapPercentRequest, context: GRPCCore.ServerContext) async throws -> FRTapResponse {
-        // Calculate screen coordinates on MainActor first
         let (x, y) = await MainActor.run { () -> (Int, Int) in
             let app = XCViewHierarchyManager.getForegroundApp(XCViewHierarchyManager.availableAppIds) 
                 ?? XCViewHierarchyManager.springboardApplication
@@ -199,9 +195,8 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
             return (x, y)
         }
         
-        // Perform tap with await
         let success = await performTapSync(x: x, y: y)
-        
+
         var response = FRTapResponse()
         response.success = success
         response.x = Int32(x)
@@ -262,19 +257,15 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
             let device = XCUIDevice.shared
             let currentOrientation = device.orientation
             
-            // Toggle logic: If portrait-ish, go landscape. If landscape-ish, go portrait.
             if currentOrientation == .landscapeLeft || currentOrientation == .landscapeRight {
-                // Currently in landscape -> rotate back to portrait
                 device.orientation = .portrait
             } else {
-                // Currently in portrait, unknown, faceUp, faceDown, etc. -> rotate to landscape
                 device.orientation = .landscapeLeft  // landscapeLeft = home button on right
             }
-            
+
             // Small delay to allow rotation to complete
             Thread.sleep(forTimeInterval: 0.3)
-            
-            // Get the new orientation after rotation
+
             let newOrientation = device.orientation
             let orientationString = self.orientationToString(newOrientation)
             
@@ -291,7 +282,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
         return response
     }
     
-    /// Converts UIDeviceOrientation to a human-readable string
     private nonisolated func orientationToString(_ orientation: UIDeviceOrientation) -> String {
         switch orientation {
         case .portrait:
@@ -374,9 +364,7 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
         let result = await MainActor.run { () -> (success: Bool, message: String) in
             let app = XCUIApplication(bundleIdentifier: bundleId)
             
-            // Build launch arguments from request.arguments
             // Note: `type` field is data type (string/int/bool), not env vs arg
-            // All arguments are passed as launchArguments in "-key" "value" format
             var launchArgs: [String] = []
             for (key, arg) in request.arguments {
                 // Pass as "-key" "value" pairs (standard iOS launch argument format)
@@ -384,7 +372,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
                 launchArgs.append(arg.value)
             }
             
-            // Decide: activate() if no args and app running, otherwise launch()
             let hasArgs = !launchArgs.isEmpty
             
             if !hasArgs && app.state == .runningForeground {
@@ -398,7 +385,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
                 app.launch()
             }
             
-            // Wait briefly and verify app state
             Thread.sleep(forTimeInterval: 0.5)
             
             if app.state == .runningForeground {
@@ -564,14 +550,13 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
             guard let jpegData = screenshot.image.jpegData(compressionQuality: compressionQuality) else {
                 return nil
             }
-            // Return raw Data directly, no base64 encoding
             return (jpegData, screenSize)
         }
         
         var response = FRRawScreenshotResponse()
         response.success = result != nil
         if let result = result {
-            response.screenshot = result.jpegData  // Raw bytes, NOT base64
+            response.screenshot = result.jpegData
             response.screenWidth = Int32(result.screenSize.width)
             response.screenHeight = Int32(result.screenSize.height)
         } else {
@@ -702,17 +687,14 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
                     // Also update the static cache for other methods that use it
                     XCViewHierarchyManager.screenSize = screenSize
                     
-                    // Capture screenshot
                     let screenshot = XCUIScreen.main.screenshot()
                     let compressionQuality = CGFloat(Double(quality) / 100.0)
                     guard let jpegData = screenshot.image.jpegData(compressionQuality: compressionQuality) else {
                         return nil
                     }
-                    
-                    // Check if image changed
+
                     let imageChanged = lastSentImageData != jpegData
-                    
-                    // Get hierarchy safely - wrap in case of errors during app transition
+
                     var flattenedHierarchy: [XCViewHierarchy] = []
                     // Using the existing getFlattenedHierarchy which has its own try-catch
                     flattenedHierarchy = XCViewHierarchyManager.getFlattenedHierarchy()
@@ -722,7 +704,6 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
                     // Like WebSocket: skip if nothing changed
                     guard imageChanged || hierarchyChanged else { return nil }
                     
-                    // Build frame
                     var frame = FRStreamFrame()
                     frame.screenWidth = Int32(screenSize.width)
                     frame.screenHeight = Int32(screenSize.height)
@@ -748,14 +729,13 @@ final class DriverServiceImpl: FRDriverService.SimpleServiceProtocol {
                 
                 if let frame = frame {
                     try await response.write(frame)
-                    consecutiveErrors = 0  // Reset error count on success
+                    consecutiveErrors = 0
                 }
                 
             } catch {
                 consecutiveErrors += 1
                 os_log("gRPC: Streaming error (attempt %d): %{public}@", log: serverLogger, type: .error, consecutiveErrors, String(describing: error))
                 
-                // If too many consecutive errors, stop streaming gracefully
                 if consecutiveErrors >= maxConsecutiveErrors {
                     os_log("gRPC: Too many errors, ending stream", log: serverLogger, type: .error)
                     isStreaming.set(false)
@@ -821,23 +801,19 @@ private func performSwipeSync(startX: Int, startY: Int, endX: Int, endY: Int, du
     // Get screen size in current orientation
     let screenSize = app.frame.size
     
-    // Create normalized coordinates (0.0 to 1.0)
     let startNormX = CGFloat(startX) / screenSize.width
     let startNormY = CGFloat(startY) / screenSize.height
     let endNormX = CGFloat(endX) / screenSize.width
     let endNormY = CGFloat(endY) / screenSize.height
-    
-    // Create coordinates relative to the app window
+
     let startCoord = app.coordinate(withNormalizedOffset: CGVector(dx: startNormX, dy: startNormY))
     let endCoord = app.coordinate(withNormalizedOffset: CGVector(dx: endNormX, dy: endNormY))
-    
-    // Calculate velocity based on duration and distance
+
     // XCUIGestureVelocity is in points per second
     let distance = sqrt(pow(CGFloat(endX - startX), 2) + pow(CGFloat(endY - startY), 2))
-    let durationSec = max(0.1, Double(durationMs) / 1000.0)  // Minimum 0.1 sec
+    let durationSec = max(0.1, Double(durationMs) / 1000.0)
     let velocity = distance / durationSec
-    
-    // Perform the swipe using press-drag gesture
+
     // press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:) is the most reliable method
     startCoord.press(forDuration: 0.05, thenDragTo: endCoord, withVelocity: XCUIGestureVelocity(velocity), thenHoldForDuration: 0)
     

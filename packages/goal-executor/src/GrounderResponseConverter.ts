@@ -50,14 +50,12 @@ export class GrounderResponseConverter {
   }): ConversionResult<Point | null> {
     const { output, flattenedHierarchy, screenWidth, screenHeight } = params;
 
-    // Case: error response
     if (output['isError'] === true) {
       return ConversionResult.fail(
         (output['reason'] as string) ?? 'Grounder returned error',
       );
     }
 
-    // Case: needsVisualGrounding
     if (output['needsVisualGrounding'] === true) {
       return ConversionResult.fail('needsVisualGrounding');
     }
@@ -73,12 +71,10 @@ export class GrounderResponseConverter {
       return ConversionResult.ok(null); // null means "no action needed"
     }
 
-    // Case: direct x, y coordinates
     if (typeof output['x'] === 'number' && typeof output['y'] === 'number') {
       const x = Math.round(output['x'] as number);
       const y = Math.round(output['y'] as number);
 
-      // Validate coordinates are within screen bounds
       if (x < 0 || x >= screenWidth || y < 0 || y >= screenHeight) {
         return ConversionResult.fail(
           `Coordinates (${x}, ${y}) out of screen bounds (${screenWidth}x${screenHeight})`,
@@ -88,7 +84,6 @@ export class GrounderResponseConverter {
       return ConversionResult.ok(new Point({ x, y }));
     }
 
-    // Case: element index → look up center coordinates
     if (typeof output['index'] === 'number') {
       const index = output['index'] as number;
 
@@ -128,14 +123,12 @@ export class GrounderResponseConverter {
   }): ConversionResult<ScrollAbsAction> {
     const { output, screenWidth, screenHeight } = params;
 
-    // Check for error
     if (output['isError'] === true) {
       return ConversionResult.fail(
         (output['reason'] as string) ?? 'Scroll grounder returned error',
       );
     }
 
-    // Parse coordinates
     const startX = output['startX'] ?? output['start_x'];
     const startY = output['startY'] ?? output['start_y'];
     const endX = output['endX'] ?? output['end_x'];
@@ -153,7 +146,6 @@ export class GrounderResponseConverter {
       );
     }
 
-    // Validate bounds
     const coords = [
       { name: 'startX', val: startX },
       { name: 'startY', val: startY },

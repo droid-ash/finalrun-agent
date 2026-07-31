@@ -32,6 +32,12 @@ export function redactResolvedValue(
     return value;
   }
 
+  // Substring-leak guard: the sort is longest value first, and that order is
+  // load-bearing. All secret values are matched by the single regex alternation
+  // built below in this order, so when one secret's value is a substring of
+  // another's the longer secret wins the match. Alternating shorter-first would
+  // match the short value inside the longer one's occurrence, leaving the rest
+  // of the longer secret unredacted in the output.
   const replacements = Object.entries(bindings.secrets)
     .filter(([, secretValue]) => Boolean(secretValue))
     .sort(([, left], [, right]) => right.length - left.length);

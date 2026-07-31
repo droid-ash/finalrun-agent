@@ -409,7 +409,6 @@ export async function executeTestOnSession(
       await startLogCapturePhase(session, config.deviceLog, state);
     }
 
-    // Execute!
     let result = await executor.executeGoal((event) => renderer.onProgress(event));
 
     let recording: TestRecordingResult | undefined;
@@ -438,7 +437,6 @@ export async function executeTestOnSession(
     }
 
     const finalResult = composeFinalResult(result, recording, deviceLog);
-    // Print summary
     renderer.printSummary(finalResult);
 
     return finalResult;

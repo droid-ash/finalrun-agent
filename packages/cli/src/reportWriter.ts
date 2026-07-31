@@ -647,7 +647,6 @@ export class ReportWriter {
 
     await fsp.copyFile(sourcePath, targetPath);
 
-    // Read, redact secrets, and write back
     try {
       const raw = await fsp.readFile(targetPath, 'utf-8');
       const redacted = redactResolvedValue(raw, bindings);

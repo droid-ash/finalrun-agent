@@ -78,7 +78,6 @@ export class CliEnv {
     }
   }
 
-  /** Get a value by key. */
   get(key: string): string | undefined {
     return this._values.get(key);
   }

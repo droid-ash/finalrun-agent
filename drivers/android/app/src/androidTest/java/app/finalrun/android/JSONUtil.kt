@@ -3,7 +3,6 @@ package app.finalrun.android
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Extension function on JSONObject to convert it to a Map<String, Any>
 fun JSONObject.toMap(): Map<String, Any> {
     val map = mutableMapOf<String, Any>()
     keys().forEach { key ->
@@ -17,7 +16,6 @@ fun JSONObject.toMap(): Map<String, Any> {
     return map
 }
 
-// Extension function on JSONArray to convert it to a List<Any>
 fun JSONArray.toList(): List<Any> {
     val list = mutableListOf<Any>()
     for (i in 0 until length()) {

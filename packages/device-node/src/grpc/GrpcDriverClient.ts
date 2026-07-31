@@ -138,9 +138,6 @@ export class GrpcDriverClient {
     }
   }
 
-  /**
-   * Close the gRPC connection.
-   */
   close(): void {
     if (this._client) {
       this._client.close();
@@ -162,7 +159,6 @@ export class GrpcDriverClient {
     });
   }
 
-  /** Tap at percentage coordinates. */
   async tapPercent(params: { xPercent: number; yPercent: number }): Promise<GrpcResponse> {
     return this._unaryCall('tapPercent', {
       point: { xPercent: params.xPercent, yPercent: params.yPercent },
@@ -183,42 +179,34 @@ export class GrpcDriverClient {
     return this._unaryCall('eraseText', {});
   }
 
-  /** Copy text. */
   async copyText(): Promise<GrpcResponse> {
     return this._unaryCall('copyText', {});
   }
 
-  /** Paste text. */
   async pasteText(): Promise<GrpcResponse> {
     return this._unaryCall('pasteText', {});
   }
 
-  /** Press system Back button. */
   async back(): Promise<GrpcResponse> {
     return this._unaryCall('back', {});
   }
 
-  /** Press system Home button. */
   async home(): Promise<GrpcResponse> {
     return this._unaryCall('home', {});
   }
 
-  /** Rotate device. */
   async rotate(): Promise<GrpcRotateResponse> {
     return this._unaryCall('rotate', {}) as Promise<GrpcRotateResponse>;
   }
 
-  /** Hide keyboard. */
   async hideKeyboard(): Promise<GrpcResponse> {
     return this._unaryCall('hideKeyboard', {});
   }
 
-  /** Press a named key. */
   async pressKey(key: string): Promise<GrpcResponse> {
     return this._unaryCall('pressKey', { key });
   }
 
-  /** Swipe from (startX, startY) to (endX, endY). */
   async swipe(params: {
     startX: number; startY: number;
     endX: number; endY: number;
@@ -227,7 +215,6 @@ export class GrpcDriverClient {
     return this._unaryCall('swipe', params);
   }
 
-  /** Launch an app. */
   async launchApp(params: {
     appUpload: { packageName: string };
     allowAllPermissions: boolean;
@@ -244,17 +231,14 @@ export class GrpcDriverClient {
     return this._unaryCall('launchApp', params, { timeoutMs: 60000, maxRetries: 2 });
   }
 
-  /** Kill a running app. */
   async killApp(packageName: string): Promise<GrpcResponse> {
     return this._unaryCall('killApp', { packageName });
   }
 
-  /** Switch to primary app. */
   async switchToPrimaryApp(packageName: string): Promise<GrpcResponse> {
     return this._unaryCall('switchToPrimaryApp', { packageName });
   }
 
-  /** Check if app is in foreground. */
   async checkAppInForeground(packageName: string, timeoutSeconds: number): Promise<GrpcResponse> {
     return this._unaryCall('checkAppInForeground', { packageName, timeoutSeconds }, {
       timeoutMs: (timeoutSeconds + 5) * 1000,
@@ -262,27 +246,22 @@ export class GrpcDriverClient {
     });
   }
 
-  /** Get list of installed apps. */
   async getAppList(): Promise<GrpcAppListResponse> {
     return this._unaryCall('getAppList', {}, { maxRetries: 2 }) as Promise<GrpcAppListResponse>;
   }
 
-  /** Update app IDs. */
   async updateAppIds(appIds: string[]): Promise<GrpcResponse> {
     return this._unaryCall('updateAppIds', { appIds }, { maxRetries: 2 });
   }
 
-  /** Get device scale factor. */
   async getDeviceScale(): Promise<GrpcDeviceScaleResponse> {
     return this._unaryCall('getDeviceScale', {}, { maxRetries: 2 }) as Promise<GrpcDeviceScaleResponse>;
   }
 
-  /** Get screen dimensions. */
   async getScreenDimension(): Promise<GrpcScreenDimensionResponse> {
     return this._unaryCall('getScreenDimension', {}, { maxRetries: 2 }) as Promise<GrpcScreenDimensionResponse>;
   }
 
-  /** Set device GPS location. */
   async setLocation(latitude: number, longitude: number): Promise<GrpcResponse> {
     return this._unaryCall('setLocation', { latitude, longitude });
   }
@@ -298,7 +277,6 @@ export class GrpcDriverClient {
     }) as Promise<GrpcScreenshotResponse>;
   }
 
-  /** Get the UI hierarchy. */
   async getHierarchy(options?: UnaryCallOptions): Promise<GrpcScreenshotResponse> {
     return this._unaryCall('getHierarchy', {}, {
       ...options,
@@ -333,7 +311,6 @@ export class GrpcDriverClient {
     }) as Promise<GrpcRawScreenshotResponse>;
   }
 
-  /** Stop execution on device. */
   async stopExecution(): Promise<GrpcResponse> {
     return this._unaryCall('stopExecution', {});
   }
@@ -407,7 +384,6 @@ export class GrpcDriverClient {
       const deadline = new Date(Date.now() + timeoutMs);
       const metadata = new grpc.Metadata();
 
-      // Dynamic method call on the gRPC client
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this._client as any)[method](request, metadata, { deadline }, (err: grpc.ServiceError | null, response: unknown) => {
         if (err) {

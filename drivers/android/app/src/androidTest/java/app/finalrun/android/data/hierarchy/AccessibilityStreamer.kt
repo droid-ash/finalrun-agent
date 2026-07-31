@@ -155,7 +155,7 @@ object AccessibilityStreamer {
      */
     fun getHierarchyForStreamingRefreshed(screenWidth: Int, screenHeight: Int): JSONArray {
         val jsonArray = JSONArray()
-        val roots = getWindowRoots() // with refresh
+        val roots = getWindowRoots()
         for (root in roots) {
             if (root != null) {
                 val nodeInfoJsonArr =
@@ -385,7 +385,6 @@ object AccessibilityStreamer {
         val uiAutomation = InstrumentationRegistry.getInstrumentation().uiAutomation
 
         return try {
-            // Try to use reflection to get all window roots like Finalrun does
             DeviceCache.uiDevice.javaClass
                 .getDeclaredMethod("getWindowRoots")
                 .apply { isAccessible = true }
@@ -395,7 +394,6 @@ object AccessibilityStreamer {
                 }
                 .toList()
         } catch (e: Exception) {
-            // Falling back to public method if reflection fails
             errorLog(LOGTAG, "Unable to call getWindowRoots: ${e.message}")
             listOf(uiAutomation.rootInActiveWindow)
         }
@@ -429,13 +427,11 @@ object AccessibilityStreamer {
         insideWebView: Boolean = false
     ): List<AccNode> {
         val nodeList = mutableListOf<AccNode>()
-        
-        // Create AccNode from current node
+
         val accNode = createAccNodeFromNodeInfo(node, displayRect, index, parentUUID)
         if (accNode != null) {
             nodeList.add(accNode)
-            
-            // Process children
+
             val childCount = node.childCount
             for (i in 0 until childCount) {
                 val child = node.getChild(i)
@@ -446,12 +442,11 @@ object AccessibilityStreamer {
                             child,
                             displayRect,
                             i,
-                            accNode.uuid, // Pass current node's UUID as parent
+                            accNode.uuid,
                             insideWebView || child.className == "android.webkit.WebView"
                         )
                         nodeList.addAll(childNodes)
-                        
-                        // Set up parent-child relationships
+
                         val childUUIDs = childNodes.filter { it.parentId == accNode.uuid }.map { it.uuid ?: "" }
                         (accNode.children as ArrayList<String>).addAll(childUUIDs)
                         
@@ -468,9 +463,6 @@ object AccessibilityStreamer {
         return nodeList
     }
 
-    /**
-     * Create AccNode from AccessibilityNodeInfo following current structure
-     */
     private fun createAccNodeFromNodeInfo(
         nodeInfo: AccessibilityNodeInfo,
         displayRect: Rect,
@@ -478,8 +470,7 @@ object AccessibilityStreamer {
         parentUUID: String? = null
     ): AccNode? {
         val bounds = getVisibleBoundsInScreen(nodeInfo, displayRect)
-        
-        // Skip nodes with invalid bounds
+
         if (bounds == null || bounds.width() <= 0 || bounds.height() <= 0) {
             return null
         }
@@ -496,7 +487,6 @@ object AccessibilityStreamer {
             // You can add a property to AccNode if needed to track this
         }
         
-        // Copy all the existing property mappings using safe string conversion
         accNode.id = safeCharSeqToString(nodeInfo.viewIdResourceName)
         accNode.clazz = safeCharSeqToString(nodeInfo.className)
         
@@ -534,7 +524,6 @@ object AccessibilityStreamer {
         if (node == null) {
             return null
         }
-        // targeted node's bounds
         val nodeRect = Rect()
         node.getBoundsInScreen(nodeRect)
         return if (nodeRect.intersect(displayRect)) {

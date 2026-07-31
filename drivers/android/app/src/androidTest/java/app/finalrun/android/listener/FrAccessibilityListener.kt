@@ -17,11 +17,6 @@ object FrAccessibilityListener : UiAutomation.OnAccessibilityEventListener {
     private const val TOAST_LENGTH_LONG_DURATION = 3500
     private var isListening = false
 
-    /**
-     * Handles the accessibility event.
-     *
-     * @param accessibilityEvent The accessibility event.
-     */
     override fun onAccessibilityEvent(accessibilityEvent: AccessibilityEvent) {
         when (accessibilityEvent.eventType) {
             AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
@@ -50,23 +45,11 @@ object FrAccessibilityListener : UiAutomation.OnAccessibilityEventListener {
         }
     }
 
-    /**
-     * Returns the last captured toast's AccessibilityNodeInfo.
-     */
     fun getToastAccessibilityNode() = toastNode
 
-    /**
-     * Checks if the captured toast is considered timed out.
-     */
     fun isToastTimedOut() =
         System.currentTimeMillis() - recentToastTimeMillis > TOAST_LENGTH_LONG_DURATION
 
-    /**
-     * Starts listening for accessibility events.
-     *
-     * @param uiAutomation The UiAutomation instance to register with.
-     * @return The current instance.
-     */
     fun start(uiAutomation: UiAutomation): FrAccessibilityListener {
         if (isListening) return this
         uiAutomation.setOnAccessibilityEventListener(this)

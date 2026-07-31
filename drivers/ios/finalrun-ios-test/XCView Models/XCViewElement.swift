@@ -46,12 +46,10 @@ struct XCViewElement {
     
     func filterAllChildrenNotInKeyboardBounds(_ keyboardFrame: CGRect) -> [XCViewElement] {
         var filteredChildren = [XCViewElement]()
-        // Function to recursively filter children
         func filterChildrenRecursively(_ element: XCViewElement, _ ancestorAdded: Bool) {
             func valueFor(_ name: String) -> Any {
                 element.root[XCUIElement.AttributeName(rawValue: name)] as Any
             }
-            // Check if the element's frame intersects with the keyboard frame
             let frame = valueFor("frame") as? XCFrame ?? .zero
             let childFrame = CGRect(
                 x: frame["X"] ?? 0,
@@ -62,17 +60,14 @@ struct XCViewElement {
             
             var currentAncestorAdded = ancestorAdded
 
-            // If it does not intersect, and no ancestor has been added, append the element
             if !keyboardFrame.intersects(childFrame) && !ancestorAdded {
                 filteredChildren.append(element)
                 currentAncestorAdded = true // Prevent adding descendants of this element
             }
-            // Continue recursion with children
             element.xcChildren?.forEach { child in
                 filterChildrenRecursively(child, currentAncestorAdded)
             }
         }
-        // Start the recursive filtering with no ancestor added
         filterChildrenRecursively(self, false)
         return filteredChildren
     }

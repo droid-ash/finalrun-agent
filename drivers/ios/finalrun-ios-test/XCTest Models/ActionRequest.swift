@@ -211,7 +211,6 @@ struct EnterTextAction: Codable {
     let type: String
     let eraseCount: Int?
     
-    // Computed property to get erase count with default
     var effectiveEraseCount: Int {
         return eraseCount ?? 100
     }

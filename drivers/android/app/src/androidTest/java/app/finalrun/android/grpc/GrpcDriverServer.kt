@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
  * gRPC server for the Android driver.
  *
  * This replaces WebSocketServerImpl. It starts a gRPC server on the specified port
- * and handles incoming RPC calls from the Dart client.
+ * and handles incoming RPC calls from the TypeScript client (packages/device-node).
  */
 class GrpcDriverServer(private val port: Int) {
     private var server: Server? = null
@@ -76,7 +76,7 @@ class GrpcDriverServer(private val port: Int) {
      */
     @Synchronized
     private fun shutdown() {
-        val srv = server ?: return  // Already cleaned up, exit early
+        val srv = server ?: return
         server = null  // Clear immediately to prevent re-entry
 
         debugLog("Stopping gRPC server...")
@@ -85,7 +85,6 @@ class GrpcDriverServer(private val port: Int) {
         driverService?.cleanup()
         driverService = null
         srv.shutdown()
-        // Wait for graceful shutdown
         if (!srv.awaitTermination(5, TimeUnit.SECONDS)) {
             debugLog("Forcing gRPC server shutdown...")
             srv.shutdownNow()

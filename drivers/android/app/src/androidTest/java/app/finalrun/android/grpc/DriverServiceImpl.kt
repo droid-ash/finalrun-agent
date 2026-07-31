@@ -36,12 +36,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * gRPC service implementation for the Android driver.
  *
- * This replaces ActionProcessor and handles all incoming RPC calls from the Dart client.
+ * This replaces ActionProcessor and handles all incoming RPC calls from the
+ * TypeScript client (packages/device-node).
  * Each method corresponds to an action that can be performed on the device.
  */
 class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
 
-    // Flag to control streaming
     private val isStreaming = AtomicBoolean(false)
     
     // Coroutine scope for streaming operations (uses SupervisorJob so child failures don't cancel the scope)
@@ -194,7 +194,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
     override fun launchApp(request: LaunchAppRequest, responseObserver: StreamObserver<ActionResponse>) {
         debugLog("gRPC: Processing LaunchApp: packageName=${request.appUpload.packageName}")
         try {
-            // Convert protobuf map to kotlin map for arguments with SingleArgument
             val arguments: Map<String, SingleArgument?> = request.argumentsMap.mapValues { (_, v) ->
                 SingleArgument(type = v.type, value = v.value)
             }
@@ -333,7 +332,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
     override fun setLocation(request: SetLocationRequest, responseObserver: StreamObserver<ActionResponse>) {
         debugLog("gRPC: Processing SetLocation: lat=${request.latitude}, long=${request.longitude}")
         try {
-            // Create a SetLocationAction for DeviceActions
             val setLocationAction = SetLocationAction(
                 lat = request.latitude,
                 long = request.longitude,
@@ -460,7 +458,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
                     DeviceActions.getScreenshotInBase64(quality = quality)
                 }
                 
-                // Wait for both to complete
                 val hierarchy = hierarchyDeferred.await()
                 val screenshot = screenshotDeferred.await()
                 
@@ -500,7 +497,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
 
         debugLog("gRPC: Starting streaming with fps=$fps, quality=$quality, frameDelay=$frameDelay")
         
-        // Cancel any existing streaming job before starting a new one
         streamingJob?.cancel()
         isStreaming.set(true)
 
@@ -527,7 +523,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
                         
                         val currentScreenshotHash = screenshotBytes.contentHashCode()
                         
-                        // Build frame with screenshot
                         val frameBuilder = StreamFrame.newBuilder()
                             .setImageData(ByteString.copyFrom(screenshotBytes))
                             .setScreenWidth(screenWidth)
@@ -541,7 +536,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
                             lastScreenshotHash = currentScreenshotHash
                         }
                         
-                        // Include hierarchy if available
                         if (lastHierarchyJson != null) {
                             frameBuilder.setHierarchy(lastHierarchyJson)
                         }
@@ -549,7 +543,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
                         responseObserver.onNext(frameBuilder.build())
                         delay(frameDelay)
                     } catch (e: CancellationException) {
-                        // Coroutine was cancelled, exit gracefully
                         throw e
                     } catch (e: Exception) {
                         errorLog("gRPC: Streaming error: ${e.message}")
@@ -571,7 +564,6 @@ class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {
         debugLog("gRPC: Processing StopStreaming")
         isStreaming.set(false)
         
-        // Cancel the streaming job with a timeout for graceful shutdown
         streamingJob?.let { job ->
             streamingScope.launch {
                 // Give 500ms for graceful shutdown, then force cancel

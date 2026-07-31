@@ -44,7 +44,6 @@ export class CliFilePathUtil implements FilePathUtil {
    * Dart: Future<String?> getADBPath()
    */
   async getADBPath(): Promise<string | null> {
-    // Check ANDROID_HOME first
     const androidHome = process.env['ANDROID_HOME'] ?? process.env['ANDROID_SDK_ROOT'];
     if (androidHome) {
       const adbPath = path.join(androidHome, 'platform-tools', 'adb');
@@ -53,7 +52,6 @@ export class CliFilePathUtil implements FilePathUtil {
       }
     }
 
-    // Try `which adb`
     try {
       const { stdout } = await execFileAsync('which', ['adb']);
       const resolved = stdout.trim();
@@ -107,12 +105,10 @@ export class CliFilePathUtil implements FilePathUtil {
    * Get the path to a user's app file (APK/IPA specified by name).
    */
   async getAppFilePath(appFileName: string): Promise<string> {
-    // First check absolute path
     if (path.isAbsolute(appFileName) && fs.existsSync(appFileName)) {
       return appFileName;
     }
 
-    // Check relative to CWD
     const cwdPath = path.resolve(process.cwd(), appFileName);
     if (fs.existsSync(cwdPath)) {
       return cwdPath;
