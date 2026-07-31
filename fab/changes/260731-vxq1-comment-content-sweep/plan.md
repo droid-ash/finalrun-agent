@@ -34,7 +34,7 @@ A rationale comment SHALL be added at each of the four verified control sites, s
 1. `packages/cli/src/testCompiler.ts` — `VARIABLE_REFERENCE_PATTERN` matches only `${variables.*}`; `${secrets.*}` tokens deliberately stay literal in compiled LLM prompts (the prompt instructs the model to echo them verbatim), so secret values never reach prompts, provider logs, or compiled artifacts.
 2. `packages/cli/src/reportArtifactStream.ts` — after the lexical `resolveArtifactPath` check, containment is re-checked on `fsp.realpath` of both root and resolved path, defeating symlink-based traversal that a purely lexical check misses.
 3. `packages/common/src/repoPlaceholders.ts` — `redactResolvedValue` sorts secret values longest-first before building the single-pass alternation, so when one secret's value is a substring of another's the longer match wins and no fragment of the longer secret survives redaction.
-4. `drivers/android/.../action/DeviceActions.kt` — `enterText` routes through `uiDevice.executeShellCommand("input text ...")` only when every char is ASCII (`code < 128`) and not in `shellMetachars`; anything else takes the clipboard paste path, preventing shell command injection via test-controlled text.
+4. `drivers/android/.../action/DeviceActions.kt` — `enterText` routes through `uiDevice.executeShellCommand("input text ...")` only when every char is ASCII (`code < 128`) and not in `shellMetachars`; anything else takes the clipboard paste path, which never places the text value on a shell command line (its only shell call is the fixed `input keyevent 279`). The gate narrows the shell-injection surface via test-controlled text rather than closing it — ASCII control characters (`\n` = 10, `\r` = 13) pass it (see Follow-Ups).
 
 - **GIVEN** each control site
 - **WHEN** the comment is added
@@ -69,11 +69,11 @@ Additional factually-wrong comments (~10 estimated, unverified) discovered durin
 ### Invariant: Comments-Only Diff
 
 #### R6: Zero runtime-behavior change
-The full change diff MUST touch only comment lines (and blank lines left by removed comments). No renames, no refactors, no dead-code deletion, no policy-file edits (`code-quality.md`/`code-review.md` are inputs), no CI/config edits beyond R4's two drivers.yml hunks. Repo checks (build, typecheck, lint, tests) MUST stay green.
+The runtime-source diff under `packages/` and `drivers/` MUST touch only comment lines (and blank lines left by removed comments); fab change records (`fab/changes/**`) and `docs/memory/**` may carry ordinary pipeline updates (Markdown, YAML, JSON). No renames, no refactors, no dead-code deletion, no policy-file edits (`code-quality.md`/`code-review.md` are inputs), no CI/config edits beyond R4's two drivers.yml hunks. Repo checks (build, typecheck, lint, tests) MUST stay green.
 
 - **GIVEN** the completed change
 - **WHEN** `git diff` is inspected and the repo's checks run
-- **THEN** every added/removed/edited line is a comment or blank line, and all checks pass
+- **THEN** every added/removed/edited line under `packages/` and `drivers/` is a comment or blank line, and all checks pass
 
 ### Non-Goals
 
@@ -122,7 +122,7 @@ The full change diff MUST touch only comment lines (and blank lines left by remo
 ### Scenario Coverage
 
 - [x] A-007 R4: The `drivers.yml` diff contains exactly two hunks, each touching only the corrected numeric claim; every rationale sentence in the file is byte-for-byte unchanged
-- [x] A-008 R6: `git diff` for the whole change contains only comment-line and blank-line modifications; `ci.yml` and `fab/project/*.md` are untouched
+- [x] A-008 R6: `git diff` under `packages/` and `drivers/` contains only comment-line and blank-line modifications (fab change records and `docs/memory/**` carry ordinary pipeline updates); `ci.yml` and `fab/project/*.md` are untouched
 
 ### Edge Cases & Error Handling
 
