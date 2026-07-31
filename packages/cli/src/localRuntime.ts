@@ -112,14 +112,3 @@ export async function resolveLocalRuntime(): Promise<LocalRuntime> {
 
   return { testRunner, doctorRunner, reportServer, reportServerManager };
 }
-
-/**
- * Heuristic for whether the current process can prompt the user. Used by
- * any code path that wants to ask before doing something heavy (e.g.
- * downloading the runtime tarball). False in CI and any non-TTY context.
- */
-export function isInteractive(): boolean {
-  if (process.env['CI']) return false;
-  if (process.env['FINALRUN_NON_INTERACTIVE']) return false;
-  return Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
-}
