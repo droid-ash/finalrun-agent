@@ -135,9 +135,12 @@ export class LogWriteStreamRegistry {
    * every path. That holds for an error {@link open}'s listener recorded long
    * before this call as much as for one raised by the flush here. It holds even
    * when the flush itself later succeeded (`writableFinished` true): an errored
-   * stream's contents are not trustworthy, and with real errors that state is
-   * unreachable anyway — `fs.WriteStream` has `autoDestroy: true`, so only a
-   * bare `emit('error')` can leave the stream alive to finish its flush.
+   * stream's contents are not trustworthy. `autoDestroy: true` makes that state
+   * unreachable in the error-then-flush direction (a real error destroys the
+   * stream before it can finish), but not in the other: auto-destroy runs
+   * `close(2)` after `finish`, and a close-time failure (EIO) is recorded with
+   * `writableFinished` already true — a guard on `writableFinished` here would
+   * silently drop exactly that error.
    */
   async finalize(outputFilePath: string, source?: Readable | null): Promise<void> {
     const entry = this._streams.get(outputFilePath);
@@ -198,8 +201,12 @@ export class LogWriteStreamRegistry {
    * before any `finalizeQuietly` for the same path. What guarantees that today
    * lives outside this file: both providers' `stopLogCapture` run the loud call
    * on the success path before any quiet catch-path call, and
-   * `LogCaptureManager`'s `_stoppedTestCases` set prevents the second stop that
-   * could otherwise reach quiet-then-loud.
+   * `LogCaptureManager`'s `_stoppedTestCases` set prevents a *sequential*
+   * second stop from reaching quiet-then-loud. Overlapping calls it does not
+   * cover: the set's `has()` check and its `add()` straddle the awaited
+   * `stopLogCapture`, so a concurrent stop/abort pair for the same capture is a
+   * check-then-act race — an accepted hazard, recorded in
+   * `docs/memory/device-node/log-capture.md`.
    */
   async finalizeQuietly(outputFilePath: string, source?: Readable | null): Promise<void> {
     try {
