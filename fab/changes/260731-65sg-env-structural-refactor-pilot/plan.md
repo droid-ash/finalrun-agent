@@ -61,7 +61,7 @@ The verification protocol SHALL produce evidence for each behavior trap:
 1. Post-change `npm run build && npm test` in `packages/common`: all 123 baseline tests pass unmodified, plus the new pinning tests.
 2. `git diff` on `packages/common/src/test/env.test.ts` shows additions only (no `-` lines).
 3. Repo-wide build/typecheck of dependent packages green (workspace-wide `npm run build`, per CI's gate).
-4. Export-surface equality: the post-change export set of built `dist/env.js` and `dist/index.js` equals the pre-change set.
+4. Export-surface equality: the post-change export set of built `dist/env.js` equals the pre-change set exactly; the post-change export set of built `dist/index.js` equals the pre-change set plus the one intentional additive symbol `REASONING_LEVELS_LABEL` (see Assumption 4 / A-009).
 
 - **GIVEN** baseline 123/123 green recorded at intake (HEAD `7b38afc`)
 - **WHEN** all edits land

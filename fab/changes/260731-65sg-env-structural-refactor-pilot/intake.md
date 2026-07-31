@@ -85,7 +85,7 @@ These may live as appended blocks in `env.test.ts` or in a sibling new test file
 2. Post-change: `npm run build && npm test` in `packages/common` — all 123 original tests pass **unmodified**, plus the new pinning tests.
 3. `git diff` on `packages/common/src/test/env.test.ts` shows additions only (no `-` lines) — or no diff at all if new tests land in a sibling file.
 4. Repo-wide typecheck/build of dependent packages (`npm run build`/`typecheck` across workspaces, per CI's gate) — confirms no consumer outside `common` broke.
-5. Export-surface check: for both `env.js` and the package root, the post-change export set equals the pre-change set (verify by listing `Object.keys(require/import)` of built `dist/env.js` and `dist/index.js` before and after, or by inspection of the re-export blocks).
+5. Export-surface check: the post-change export set of built `dist/env.js` equals the pre-change set exactly; the package root (`dist/index.js`) equals the pre-change set plus the one intentional additive symbol `REASONING_LEVELS_LABEL` (see plan.md Assumption 4 / A-009). Verify by listing `Object.keys(require/import)` of both built files before and after, or by inspection of the re-export blocks.
 
 ## Affected Memory
 
