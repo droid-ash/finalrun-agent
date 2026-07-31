@@ -36,6 +36,27 @@ export type FeatureName = (typeof ALL_FEATURES)[number];
 export const REASONING_LEVELS = ['minimal', 'low', 'medium', 'high'] as const;
 export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
 
+export const REASONING_LEVELS_LABEL = REASONING_LEVELS.join(', ');
+
+export function parseReasoningLevel(value: unknown, label: string): ReasoningLevel | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string. Allowed values: ${REASONING_LEVELS_LABEL}.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+  if (!REASONING_LEVELS.includes(trimmed as ReasoningLevel)) {
+    throw new Error(
+      `${label} has invalid value "${trimmed}". Allowed values: ${REASONING_LEVELS_LABEL}.`,
+    );
+  }
+  return trimmed as ReasoningLevel;
+}
+
 // ============================================================================
 // AI provider identifiers and shared model-string parsing. Lives here so
 // both the CLI (workspace config, --model flag) and the goal-executor

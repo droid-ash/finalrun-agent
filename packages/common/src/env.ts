@@ -4,13 +4,17 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
-import { REASONING_LEVELS, type ReasoningLevel } from './constants.js';
+// Backward-compatibility shim: these live in constants.ts, but consumers
+// historically imported them through env.js — env.test.ts still does, and the
+// constitution's Test Integrity rule forbids editing it to chase a new path.
 export {
   MODEL_FORMAT_EXAMPLE,
   PROVIDER_ENV_VARS,
+  REASONING_LEVELS_LABEL,
   SUPPORTED_AI_PROVIDERS,
   SUPPORTED_AI_PROVIDERS_LABEL,
   parseModel,
+  parseReasoningLevel,
   type ParsedModel,
   type SupportedProvider,
 } from './constants.js';
@@ -95,25 +99,4 @@ export class CliEnv {
   set(key: string, value: string): void {
     this._values.set(key, value);
   }
-}
-
-export const REASONING_LEVELS_LABEL = REASONING_LEVELS.join(', ');
-
-export function parseReasoningLevel(value: unknown, label: string): ReasoningLevel | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== 'string') {
-    throw new Error(`${label} must be a string. Allowed values: ${REASONING_LEVELS_LABEL}.`);
-  }
-  const trimmed = value.trim();
-  if (trimmed === '') {
-    return undefined;
-  }
-  if (!REASONING_LEVELS.includes(trimmed as ReasoningLevel)) {
-    throw new Error(
-      `${label} has invalid value "${trimmed}". Allowed values: ${REASONING_LEVELS_LABEL}.`,
-    );
-  }
-  return trimmed as ReasoningLevel;
 }

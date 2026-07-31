@@ -111,7 +111,7 @@ export {
   type CheckRunnerOptions,
   type CheckRunnerResult,
 } from './checkRunner.js';
-export { CliEnv, parseReasoningLevel } from './env.js';
+export { CliEnv } from './env.js';
 export {
   resolveAppConfig,
   resolveAppOverrideIdentifier,
