@@ -66,15 +66,6 @@ export function resolveFinalRunRootDir(): string {
   return path.join(os.homedir(), '.finalrun');
 }
 
-export function resolveCliCacheRoot(startDir: string = __dirname): string {
-  const overrideRoot = process.env['FINALRUN_CACHE_DIR'];
-  if (overrideRoot && overrideRoot.trim()) {
-    return path.resolve(overrideRoot, resolveCliPackageVersion(startDir));
-  }
-
-  return path.join(resolveFinalRunRootDir(), 'assets', resolveCliPackageVersion(startDir));
-}
-
 // Set to "true" by `bun build --define` in scripts/build-binary.sh; undefined
 // in dev / tsc / `bun run` paths. Mirrors the declaration in localRuntime.ts.
 declare const FINALRUN_IS_STANDALONE_BINARY: string | undefined;
