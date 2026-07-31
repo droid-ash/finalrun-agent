@@ -21,15 +21,84 @@ name: Drivers
 # status check). No job in THIS file may be named `test` — a same-named check
 # from this workflow would be indistinguishable from the required one.
 #
-# There is deliberately NO `concurrency:` block, for the reason ci.yml records
-# at length: a bare group on the default `queue: single` lets a newer run
-# cancel an existing PENDING one, and a cancelled run at a PR tip reads
-# exactly like a clean one.
+# Unlike ci.yml, this workflow DOES carry a `concurrency:` block — see the block
+# below `on:` for the full reasoning. The short version: ci.yml's
+# no-cancellation rule is load-bearing because `test` is the required check, and
+# a cancelled run at a PR tip reads exactly like a clean one to the merge gate.
+# Nothing in THIS file is required by ruleset 14531661, so no merge gate consults
+# it. The PENDING-eviction footgun ci.yml records is still real, which is exactly
+# why the group key below is run-id-scoped on push to main.
 on:
+  # Both triggers carry the SAME `paths` list, duplicated verbatim. That is a
+  # deliberate choice, not a forced one: GitHub Actions HAS supported YAML
+  # anchors/aliases since 2025-09-18, so a `&anchor`/`*alias` pair would parse.
+  # Two short adjacent literal lists are kept because they are trivially eyeball-
+  # and diff-verifiable, and anchor support specifically inside the `on:` trigger
+  # block is not something this change verified. Keep the two lists byte-identical.
+  #
+  # A `paths` filter means the workflow does not run AT ALL when nothing
+  # matching changed: the check is absent, not green. That is safe here and
+  # would NOT be on ci.yml — ruleset 14531661 requires exactly one context,
+  # `test`, which resolves to ci.yml's job, so the two jobs below are additive
+  # and block no merge by their absence. Never copy this filter to ci.yml
+  # without also adding an always-runs sentinel job.
+  #
+  # Why each entry earns its place:
+  #   - drivers/**  — both native trees, their gradle files, the gradle wrapper,
+  #     the Xcode project, and the committed generated Swift under
+  #     drivers/ios/finalrun-ios-test/Generated/.
+  #   - proto/**    — load-bearing and easy to miss.
+  #     drivers/android/app/build.gradle.kts:104 adds the repo-root `proto`
+  #     directory as a protobuf source dir, so the Android driver compiles
+  #     proto/finalrun/driver.proto from source on every build. A proto edit can
+  #     break the Kotlin compile with no file under drivers/ changing at all.
+  #   - the two build scripts — each job's single `run:` step is one of them, so
+  #     a change to either changes what this gate actually does.
+  #   - this workflow file — so a change to the gate is verified by the gate.
+  # resources/android/ and resources/ios/ are deliberately ABSENT: they are the
+  # build scripts' output staging directories, not build inputs.
   pull_request:
     branches: [main]
+    paths:
+      - 'drivers/**'
+      - 'proto/**'
+      - 'scripts/build-drivers-android.sh'
+      - 'scripts/build-drivers-ios.sh'
+      - '.github/workflows/drivers.yml'
+  # Filtering `push` too is intentional: a merge whose diff touches no driver
+  # path cannot break either native build, and a merge that does touch one still
+  # matches the filter and still runs the post-merge net.
   push:
     branches: [main]
+    # Keep byte-identical to the pull_request list above.
+    paths:
+      - 'drivers/**'
+      - 'proto/**'
+      - 'scripts/build-drivers-android.sh'
+      - 'scripts/build-drivers-ios.sh'
+      - '.github/workflows/drivers.yml'
+
+# Supersede in-flight PR runs; never queue or evict a main run.
+#
+# On a pull_request the group is the PR ref, so a newer push cancels the run
+# the previous push started — the measured waste this closes is PR #167's
+# three pushes, ~200 billable minutes for one informative verdict. A cancelled
+# `drivers` run is safe to trade away in a way a cancelled `ci` run is not:
+# ruleset 14531661 requires only ci.yml's `test` context, so no merge gate
+# consults this workflow, and the commit a cancellation skipped is by
+# definition no longer the tip.
+#
+# On a push to main the group key is the run id, which is unique per run — so
+# every main run is alone in its group and behaves exactly as it does today:
+# not cancelled, and never queued behind or evicted by another. A bare
+# `group: drivers-${{ github.ref }}` would NOT be equivalent: GitHub cancels an
+# existing PENDING run whenever a newer run queues into the same group on the
+# default `queue: single` (cancel-in-progress governs only the in-progress
+# run), so two rapid merges would silently cost the middle one its verdict.
+# See docs/memory/ci/pr-quality-gate.md for the long form of that footgun.
+concurrency:
+  group: drivers-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Debug + androidTest APK pair, both required: the driver lives under
@@ -37,6 +106,12 @@ jobs:
   # release build produces artifacts that cannot host it.
   android:
     runs-on: ubuntu-latest
+    # Job level, not step level, so checkout and toolchain setup are inside the
+    # bound. Worst `android` run observed across five recorded runs: 2m36s
+    # (57s, 58s, 2m20s, 2m33s, 2m36s), so 15 leaves ~5.8x headroom for a cold
+    # gradle cache and runner-image variance. It replaces GitHub's 360-minute
+    # default: a wedged job now costs 15 Linux-rate minutes, not 360.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +135,14 @@ jobs:
   # windows-latest runner, so a second runner OS is established precedent.
   ios:
     runs-on: macos-latest
+    # Worst `ios` run observed across five recorded runs: 9m20s (5m36s, 5m57s,
+    # 6m57s, 7m28s, 9m20s — the longest being the push-to-main run), so 25
+    # leaves ~2.7x headroom. Deliberately the tighter bound RELATIVE to its
+    # worst run, because macos-latest bills at 10x: a hung xcodebuild now costs
+    # 250 billable minutes instead of the ~3,600 the 360-minute default allows.
+    # A spurious timeout is a red job a re-run clears — visible and
+    # self-correcting — which beats a cap so generous it defeats its purpose.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 

@@ -209,7 +209,11 @@ the driver (a single `@Test` starting a gRPC server and blocking forever, zero a
 the only file under `app/src/test/` is an `assertEquals(4, 2+2)` scaffold, and `drivers/ios` has no
 test target. The `.github/workflows/drivers.yml` compile gate
 ([/ci/pr-quality-gate.md](/ci/pr-quality-gate.md)) is the only automated verification native code
-gets, and it proves compilation and linking — never that a tap lands where it was asked to.
+gets, and it proves compilation and linking — never that a tap lands where it was asked to. That gate
+is also **path-filtered**: it runs only when a diff touches one of the paths it names (the list, and
+why `proto/**` is on it, are in that file), so a change that breaks a native build while touching no
+listed path merges with no automated verification at all — which makes widening the filter part of
+adding any new native build input.
 
 A change to Kotlin or Swift in this repo is therefore **source-verified plus compile-verified**, and
 MUST be described that way. Behavioural confirmation needs a manual device session. Where a native

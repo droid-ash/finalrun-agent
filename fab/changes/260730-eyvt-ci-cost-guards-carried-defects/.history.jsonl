@@ -1,0 +1,18 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-30T17:23:53Z"}
+{"args":"CI hygiene and carried-forward defects: timeout-minutes on both drivers.yml jobs, paths filter + concurrency cancel-in-progress on drivers.yml, fix the open() persistent error listener in logWriteStream.ts, add .github/ to git-pr expected write areas","cmd":"fab-new","event":"command","ts":"2026-07-30T17:23:53Z"}
+{"delta":"+4.5","event":"confidence","score":4.5,"trigger":"calc-score","ts":"2026-07-30T17:29:07Z"}
+{"delta":"+0.0","event":"confidence","score":4.5,"trigger":"calc-score","ts":"2026-07-30T17:31:11Z"}
+{"delta":"+0.2","event":"confidence","score":4.7,"trigger":"calc-score","ts":"2026-07-30T17:34:03Z"}
+{"delta":"+0.0","event":"confidence","score":4.7,"trigger":"calc-score","ts":"2026-07-30T17:34:49Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-30T17:37:33Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-30T17:37:48Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-30T17:50:57Z"}
+{"event":"review","result":"failed","ts":"2026-07-30T18:06:03Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-30T18:06:03Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-30T18:16:34Z"}
+{"delta":"+0.0","event":"confidence","score":4.6,"trigger":"calc-score","ts":"2026-07-30T18:40:57Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-30T18:40:57Z"}
+{"event":"review","result":"passed","ts":"2026-07-30T18:40:57Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-30T18:51:39Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-30T18:54:50Z"}
+{"event":"review","result":"passed","ts":"2026-07-30T19:09:44Z"}
