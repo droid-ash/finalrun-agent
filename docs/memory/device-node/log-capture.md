@@ -75,9 +75,10 @@ Two entry points express the difference in how a failure is reported:
   failure being reported.
 
 `finalize` is idempotent and cheap on repeat: an untracked path (a capture that never opened a
-stream, or one an earlier stop already finalized) returns at once, a stream something already ended
-or destroyed is not ended again, and the terminal-state wait is skipped once `stream.closed` is true
-— which is what lets an error path call it without knowing whether the success path already did.
+stream, or one an earlier stop already finalized) returns at once, a stream that has already ended
+or been destroyed is not ended again, and the terminal-state wait is skipped once `stream.closed`
+is true — which is what lets an error path call it without knowing whether the success path already
+did.
 Untracking and ending run in a `finally`, so a rejecting drain cannot strand a stream that nothing
 else holds a handle on, and that rejection keeps precedence over the terminal-state decision after
 it. A stream destroyed *by an error* still reaches `'close'`, so it is untracked and ended like any
