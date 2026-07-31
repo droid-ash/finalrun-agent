@@ -133,7 +133,14 @@ export class LogWriteStreamRegistry {
    * A write error rejects, because a log that could not be flushed is a failed
    * stop, not a successful one — but the stream is ended and untracked first, on
    * every path. That holds for an error {@link open}'s listener recorded long
-   * before this call as much as for one raised by the flush here.
+   * before this call as much as for one raised by the flush here. It holds even
+   * when the flush itself later succeeded (`writableFinished` true): an errored
+   * stream's contents are not trustworthy. `autoDestroy: true` makes that state
+   * unreachable in the error-then-flush direction (a real error destroys the
+   * stream before it can finish), but not in the other: auto-destroy runs
+   * `close(2)` after `finish`, and a close-time failure (EIO) is recorded with
+   * `writableFinished` already true — a guard on `writableFinished` here would
+   * silently drop exactly that error.
    */
   async finalize(outputFilePath: string, source?: Readable | null): Promise<void> {
     const entry = this._streams.get(outputFilePath);
@@ -184,6 +191,22 @@ export class LogWriteStreamRegistry {
    * Shared here rather than repeated in each provider for the same reason the
    * rest of this bookkeeping is: the two versions would differ only by a log
    * prefix, and the output file path already identifies the capture.
+   *
+   * Ordering matters across the two entry points: a recorded error is consumed
+   * by whichever finalization runs first ({@link finalize} drops the entry in
+   * its `finally`), so a quiet call before a loud one for the same path
+   * swallows the error here and leaves the later {@link finalize} to find an
+   * untracked path and resolve — success over a possibly-unwritten file. A
+   * caller that needs the error surfaced must therefore call {@link finalize}
+   * before any `finalizeQuietly` for the same path. What guarantees that today
+   * lives outside this file: both providers' `stopLogCapture` run the loud call
+   * on the success path before any quiet catch-path call, and
+   * `LogCaptureManager`'s `_stoppedTestCases` set prevents a *sequential*
+   * second stop from reaching quiet-then-loud. Overlapping calls it does not
+   * cover: the set's `has()` check and its `add()` straddle the awaited
+   * `stopLogCapture`, so a concurrent stop/abort pair for the same capture is a
+   * check-then-act race — an accepted hazard, recorded in
+   * `docs/memory/device-node/log-capture.md`.
    */
   async finalizeQuietly(outputFilePath: string, source?: Readable | null): Promise<void> {
     try {

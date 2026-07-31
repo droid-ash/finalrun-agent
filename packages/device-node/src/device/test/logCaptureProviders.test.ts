@@ -223,6 +223,72 @@ for (const platform of ['Android', 'iOS'] as const) {
   });
 }
 
+/**
+ * The write stream the registry tracks for `outputFilePath`, read structurally
+ * for the same reason as `providerRegistry` above. The provider owns the stream
+ * privately, and the failing-stop tests below must await its asynchronous
+ * `error` event deterministically before stopping — anything sleep-based races
+ * the fd open on a slow box.
+ */
+function trackedStream(registry: LogWriteStreamRegistry, outputFilePath: string): EventEmitter {
+  const entry = (
+    registry as unknown as { _streams: Map<string, { stream: EventEmitter }> }
+  )._streams.get(outputFilePath);
+  assert.ok(entry, `no tracked write stream for ${outputFilePath}`);
+  return entry.stream;
+}
+
+for (const platform of ['Android', 'iOS'] as const) {
+  const createProvider = (childProcess: FakeChildProcess): LogCaptureProvider =>
+    platform === 'Android'
+      ? new AndroidLogcatProvider({
+          execFileFn: execFileStub,
+          spawnFn: spawnStub(childProcess),
+        })
+      : new IOSLogProvider({
+          execFileFn: execFileStub,
+          spawnFn: spawnStub(childProcess),
+        });
+
+  test(`${platform} log capture stop reports failure over a write stream that never opened`, async () => {
+    const outputFilePath = await createUnopenableFilePath();
+    const childProcess = new FakeChildProcess();
+    const provider = createProvider(childProcess);
+
+    // The start still succeeds: `fs.createWriteStream` opens its fd
+    // asynchronously, so the ENOENT arrives as an `error` event only after
+    // `startLogCapture` has returned.
+    await startCapture(provider, childProcess, outputFilePath);
+
+    const [openError] = await once(
+      trackedStream(providerRegistry(provider), outputFilePath),
+      'error',
+    );
+    assert.match(String(openError), /ENOENT/);
+
+    // No payload: the defect this pins is about the error, not the bytes — the
+    // errored stream auto-destroyed and the pipe detached itself, so nothing
+    // written here could reach the file anyway. Ending stdout lets the stop's
+    // drain reach EOF instead of its 5 s timeout.
+    childProcess.stdout.end();
+
+    const stopped = await provider.stopLogCapture({
+      process: childProcess as unknown as ChildProcess,
+      outputFilePath,
+    });
+
+    // The caller-visible half of the fix the registry tests above cannot see:
+    // the success path calls `finalize` — not `finalizeQuietly` — so the
+    // recorded open error reaches the stop response as a failure. Mutating
+    // that one call to the quiet variant restores the original defect (a
+    // successful stop over a log file that was never written) while every
+    // registry-level test stays green; these assertions are what kill it.
+    assert.equal(stopped.success, false);
+    assert.match(stopped.message ?? '', /ENOENT/);
+    assert.equal(liveStreamCount(providerRegistry(provider)), 0);
+  });
+}
+
 test('LogWriteStreamRegistry ends and untracks the stream when the source errors', async () => {
   const outputFilePath = await createOutputFilePath();
   const registry = new LogWriteStreamRegistry();

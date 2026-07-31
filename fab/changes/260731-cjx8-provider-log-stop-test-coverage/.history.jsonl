@@ -1,0 +1,15 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-31T10:35:17Z"}
+{"args":"Close a mutation-proven test-coverage gap in packages/device-node: no provider-level test puts a failing write stream through stopLogCapture, so the finalize-vs-finalizeQuietly distinction PR #168 fixed is unpinned. Add provider tests against an unopenable path asserting stop reports success:false; verify the test kills the finalize-\u003efinalizeQuietly mutation. Also assess (judgement, not blind fix): finalize's unconditional entry.error rejection vs the writableFinished contract, and the once-consumed recorded error ordering hazard.","cmd":"fab-new","event":"command","ts":"2026-07-31T10:35:17Z"}
+{"delta":"+4.7","event":"confidence","score":4.7,"trigger":"calc-score","ts":"2026-07-31T10:36:58Z"}
+{"delta":"+0.0","event":"confidence","score":4.7,"trigger":"calc-score","ts":"2026-07-31T10:39:48Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-31T10:40:20Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T10:40:26Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T10:41:26Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T10:47:41Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-31T10:59:04Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T10:59:04Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T10:59:50Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-31T11:03:52Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-31T11:07:02Z"}
+{"cmd":"git-pr-review","event":"command","ts":"2026-07-31T11:08:40Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T11:27:17Z"}
