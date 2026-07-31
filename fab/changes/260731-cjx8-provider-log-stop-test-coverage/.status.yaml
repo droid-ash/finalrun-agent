@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 5
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-31T10:40:26Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:47:41Z"}
     review: {started_at: "2026-07-31T10:47:41Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:59:04Z"}
     hydrate: {started_at: "2026-07-31T10:59:04Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:03:52Z"}
-    ship: {started_at: "2026-07-31T11:03:52Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-31T11:03:52Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:07:02Z"}
+    review-pr: {started_at: "2026-07-31T11:07:02Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/173
 change_type_source: explicit
 true_impact:
-    added: 0
-    deleted: 0
-    net: 0
+    added: 456
+    deleted: 1
+    net: 455
     tests:
-        added: 0
+        added: 66
         deleted: 0
-        net: 0
-    computed_at: "2026-07-31T11:03:52Z"
-    computed_at_stage: hydrate
+        net: 66
+    computed_at: "2026-07-31T11:07:02Z"
+    computed_at_stage: ship
 summary: Pinned the caller-visible finalize-vs-finalizeQuietly stop contract with two mutation-verified provider-level failing-stream tests, and documented the keep-unconditional-rejection and once-consumed-recorded-error decisions
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T11:03:52Z
+last_updated: 2026-07-31T11:07:02Z
