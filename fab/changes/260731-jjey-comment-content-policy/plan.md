@@ -54,11 +54,11 @@ The `## Project-Specific Review Rules` section of `fab/project/code-review.md` (
 ### Scope: policy-only diff
 
 #### R7: Only the two policy files change
-The change's diff MUST be confined to `fab/project/code-quality.md`, `fab/project/code-review.md`, and this change's own `plan.md`. No source file (code, YAML, scripts) is edited, no comment is removed anywhere, and no lint/CI enforcement is added.
+The change's diff MUST be confined to `fab/project/code-quality.md`, `fab/project/code-review.md`, and this change's own workflow artifacts (`intake.md`, `plan.md`, `.history.jsonl`, and `.status.yaml`). No source file (code, YAML, scripts) is edited, no comment is removed anywhere, and no lint/CI enforcement is added.
 
 - **GIVEN** the completed change
 - **WHEN** `git status --porcelain` is inspected
-- **THEN** only the two policy files and `fab/changes/260731-jjey-comment-content-policy/plan.md` appear as modified/added
+- **THEN** only the two policy files and this change's workflow artifacts (`intake.md`, `plan.md`, `.history.jsonl`, and `.status.yaml`) appear as modified/added
 
 ### Non-Goals
 
@@ -77,7 +77,7 @@ The change's diff MUST be confined to `fab/project/code-quality.md`, `fab/projec
 
 ### Phase 3: Integration & Edge Cases
 
-- [x] T005 Verify both edited files are well-formed markdown consistent with their existing structure (section order preserved, heading levels intact) and `git status --porcelain` shows only the two policy files plus this change's plan.md <!-- R7 -->
+- [x] T005 Verify both edited files are well-formed markdown consistent with their existing structure (section order preserved, heading levels intact) and `git status --porcelain` shows only the two policy files plus this change's workflow artifacts (`intake.md`, `plan.md`, `.history.jsonl`, `.status.yaml`) <!-- R7 -->
 
 ## Acceptance
 
@@ -107,7 +107,7 @@ The change's diff MUST be confined to `fab/project/code-quality.md`, `fab/projec
 
 - [x] A-011 Pattern consistency: new policy text matches each file's existing structure and style (terse bullets, bold lead-ins, section ordering; existing HTML guidance comments preserved)
 - [x] A-012 No unnecessary duplication: the two files divide cleanly — author-facing content rules in code-quality.md, reviewer-facing severity/scope in code-review.md, with cross-reference rather than repetition
-- [x] A-013 Scope discipline (R7): `git status --porcelain` shows only `fab/project/code-quality.md`, `fab/project/code-review.md`, and this change's `plan.md` — no source file, workflow YAML, or comment sweep
+- [x] A-013 Scope discipline (R7): `git status --porcelain` shows only `fab/project/code-quality.md`, `fab/project/code-review.md`, and this change's workflow artifacts (`intake.md`, `plan.md`, `.history.jsonl`, `.status.yaml`) — no source file, workflow YAML, or comment sweep
 
 ## Notes
 
