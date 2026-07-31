@@ -17,6 +17,11 @@
 - **Should-fix**: Code quality issues, pattern inconsistencies — addressed when clear and low-effort
 - **Nice-to-have**: Style suggestions, minor improvements — may be skipped
 
+Comment-content findings map as follows (policy in `code-quality.md` `## Comments`):
+
+- **New restatement comments** introduced by a change → **Should-fix** — a code-quality issue; flag with file:line, addressed when clear and low-effort
+- **Deleting a rationale comment that fails recoverability** (removing information the reader cannot get back from the code — the `drivers.yml` category) → **Must-fix** — information loss is expensive to reverse; the deleted knowledge may exist nowhere else
+
 ## Review Scope
 
 <!-- What the review sub-agent inspects. Adjust to exclude generated code,
@@ -50,3 +55,7 @@
      - No new dependencies without justification in the spec
      - Database migrations must be reversible
      - All user-facing strings must be internationalized -->
+
+- Comment content is governed by `code-quality.md` `## Comments`; the reviewer applies the deletion test per claim, not per block or file
+- **Sweep scope**: the planned restatement-comment sweep (~146 audit findings, executed as a separate later change) targets restatement comments only. **Non-obvious rationale claims are out of the sweep's scope regardless of comment-to-code ratio**; in a mixed block, restatement claims remain in scope while adjacent rationale claims are kept. This explicitly covers CI/workflow files such as `.github/workflows/drivers.yml` and `ci.yml`, whose rationale blocks (ruleset IDs, cross-file couplings, measured timings, rejected alternatives) landed recently and deliberately
+- **Ambiguity bias**: when a comment is arguably either kind, keep it. A false keep costs a few lines; a false delete costs unrecoverable context
