@@ -17,13 +17,14 @@ const LOG_DRAIN_TIMEOUT_MS = 5000;
 /**
  * A tracked write stream plus the first `error` it emitted, if any.
  *
- * The registry tracks this rather than the bare stream because an error has to
- * outlive the event that carried it: the only place the old code could observe
- * one was `await finished(stream)` inside `_endAndFlush`, which does not exist
- * as a listener until `finalize` runs — and which `_endAndFlush` then skips
- * anyway, because an errored stream auto-destroys and hits its early return. So
- * the error is remembered here at the moment it happens, and {@link
- * LogWriteStreamRegistry.finalize} reads it back.
+ * The registry tracks this rather than the bare stream because the first error
+ * has to outlive the event that carried it: `stream.errored` holds only the
+ * error that *destroyed* the stream, which on a stream that failed more than
+ * once is fallout rather than cause. The first error — the one that explains
+ * the failure — is remembered here at the moment it happens. When {@link
+ * LogWriteStreamRegistry.finalize} rejects, it rejects with this ahead of
+ * `stream.errored`; on a stream that nonetheless finished and closed cleanly
+ * the record is only warned about, because the file is known complete.
  *
  * Deliberately not exported: the registry itself is kept out of the package
  * barrel as an internal detail of the two log-capture providers, so its map
@@ -74,14 +75,16 @@ export class LogWriteStreamRegistry {
     // does not forward a destination's errors to the source, so with no listener
     // the first one is an unhandled 'error' — which Node throws, taking the CLI
     // down in the middle of a run. The error is RECORDED and not merely logged
-    // because `_endAndFlush` early-returns on an errored (hence auto-destroyed)
-    // stream: without the record, `finalize` would resolve and report a
-    // successful stop over a log file that was never written.
+    // because the record is what `finalize`'s decision prefers over
+    // `stream.errored`: `stream.errored` carries only the error that destroyed
+    // the stream — on a stream that failed twice, the fallout, not the cause —
+    // and on the one flushed-cleanly path a stale record survives into, the
+    // record is what the warning names.
     stream.on('error', (error) => {
       // First error wins: it is the one that explains the failure, and anything
       // after it is fallout on an already-destroyed stream. Recorded FIRST, so
-      // the record — the thing `finalize` reads to fail the stop — is in place
-      // before anything fallible runs.
+      // the record — what `finalize`'s decision rejects with, ahead of
+      // `stream.errored` — is in place before anything fallible runs.
       entry.error ??= error;
 
       // The log call is guarded because THIS listener must not throw. `Logger.e`
@@ -123,24 +126,21 @@ export class LogWriteStreamRegistry {
    * at `outputFilePath` is complete when this resolves.
    *
    * Untracked paths (a capture that never opened a stream, a path an earlier
-   * stop already finalized) return at once, and an already-finished or
-   * already-destroyed stream skips the flush: there is nothing left to flush in
-   * either case. That also makes this idempotent and cheap on repeat, so a
-   * provider's error path may call it without knowing whether its success path
-   * already did. A stream destroyed *by an error* is the one exception to
-   * "returns quietly" — it skips the flush and then rejects with that error.
+   * stop already finalized) return at once. That makes this idempotent and
+   * cheap on repeat, so a provider's error path may call it without knowing
+   * whether its success path already did.
    *
-   * A write error rejects, because a log that could not be flushed is a failed
-   * stop, not a successful one — but the stream is ended and untracked first, on
-   * every path. That holds for an error {@link open}'s listener recorded long
-   * before this call as much as for one raised by the flush here. It holds even
-   * when the flush itself later succeeded (`writableFinished` true): an errored
-   * stream's contents are not trustworthy. `autoDestroy: true` makes that state
-   * unreachable in the error-then-flush direction (a real error destroys the
-   * stream before it can finish), but not in the other: auto-destroy runs
-   * `close(2)` after `finish`, and a close-time failure (EIO) is recorded with
-   * `writableFinished` already true — a guard on `writableFinished` here would
-   * silently drop exactly that error.
+   * Success or failure is decided from the stream's TERMINAL state, not from
+   * whether an error was ever recorded: the `finally` waits until the stream
+   * has emitted `'close'`, so every error the stream will ever deliver —
+   * including a close-time EIO from the `close(2)` auto-destroy runs *after*
+   * `finish` — has been observed before the decision runs, never missed by
+   * timing. The stop succeeds iff the stream finished and closed cleanly
+   * (`writableFinished` with no `errored`): a log that could not be flushed is
+   * a failed stop, and one that was flushed and closed IS known to be complete.
+   * Anything else rejects with the first recorded error — one {@link open}'s
+   * listener recorded long before this call as much as one raised by the flush
+   * here — but the stream is ended and untracked first, on every path.
    */
   async finalize(outputFilePath: string, source?: Readable | null): Promise<void> {
     const entry = this._streams.get(outputFilePath);
@@ -169,16 +169,45 @@ export class LogWriteStreamRegistry {
       await this._endAndFlush(stream);
     }
 
-    // Reached only when nothing above threw: a drain rejection or a flush error
-    // is already the failure being reported, and re-throwing here would replace
-    // it with a redundant one. A recorded write error still fails the stop, per
-    // the contract above — a log that could not be flushed is not a stop. This
-    // is also the only way such an error can surface at all: `_endAndFlush`
-    // early-returns on the auto-destroyed stream an error leaves behind, so
-    // without this the stop would resolve over an unwritten file.
-    if (entry.error) {
-      throw entry.error;
+    // Reached only when nothing above threw: a drain rejection is already the
+    // failure being reported, and re-throwing here would replace it with a
+    // redundant one. `_endAndFlush` has awaited the terminal 'close' by now, so
+    // this reads settled state rather than racing the stream's own teardown —
+    // the pre-terminal-state version of this check could resolve before a
+    // close-time error's listener ran, a successful stop over a file whose
+    // durability the OS just refused to confirm.
+    if (stream.writableFinished && stream.errored === null) {
+      if (entry.error) {
+        // Only a bare non-destroying `emit('error', …)` can leave a recorded
+        // error on a stream that still finished and closed cleanly: every real
+        // fs error either destroys the stream (`autoDestroy: true`) or arrives
+        // at close time, setting `errored`. The file is known to be complete,
+        // so the stop succeeds — the contract keys failure to the file, not to
+        // the stream's event history — and the stale record is worth a warning,
+        // not a failure. Guarded like every log call on a path whose outcome
+        // must not change: a throwing logger sink must not flip a successful
+        // stop into a rejection.
+        try {
+          Logger.w(
+            `LogWriteStreamRegistry: stream finished and closed cleanly despite a recorded error (${entry.error.message}); treating the stop as successful: ${outputFilePath}`,
+          );
+        } catch {
+          // Deliberately empty: the stop's outcome is already decided, and a
+          // logger that just failed is not where a failing logger gets reported.
+        }
+      }
+      return;
     }
+
+    // The stream did not finish, or an error destroyed it — possibly at close
+    // time, after a clean `finish`. First-recorded error wins; `stream.errored`
+    // is the fallback for a destroy that recorded nothing, and the synthesized
+    // error covers the in-principle-unreachable state where both are null.
+    throw (
+      entry.error ??
+      stream.errored ??
+      new Error(`log write stream did not finish cleanly: ${outputFilePath}`)
+    );
   }
 
   /**
@@ -215,10 +244,9 @@ export class LogWriteStreamRegistry {
       // Guarded for the same reason {@link open}'s listener guards its own log
       // call: `Logger.e` is fallible on its own schedule, so an unguarded call
       // here would make this method reject and break the "logged rather than
-      // thrown" contract above. `finalize`'s new re-throw of a recorded error is
-      // what makes that reachable — this catch used to be reached only by a drain
-      // or flush rejection, and on ENOSPC it now runs with the logger sink just as
-      // likely to fail.
+      // thrown" contract above. The failures that land here — a drain rejection,
+      // a stream an fs error destroyed — include ENOSPC, exactly the condition
+      // under which the logger sink is just as likely to fail.
       try {
         Logger.e(
           `LogWriteStreamRegistry: Failed to finalize log write stream: ${outputFilePath}`,
@@ -258,25 +286,36 @@ export class LogWriteStreamRegistry {
   }
 
   /**
-   * Ends the write stream and waits for its flush. The pipe ends the destination
-   * itself once `source` reaches EOF, so this usually finds the stream already
-   * ended and only awaits the flush; the explicit `end()` covers the paths with
-   * no source at all — a start that threw before spawning, or a stop whose
-   * child never delivered its signal.
+   * Ends the write stream (unless something already ended or destroyed it) and
+   * waits for its terminal `'close'`, which `fs.WriteStream` always emits
+   * (`emitClose` defaults true): after `end()` → `finish` → auto-destroy on the
+   * clean path, after `destroy(err)` on the failing one. The pipe ends the
+   * destination itself once `source` reaches EOF, so the explicit `end()`
+   * covers the paths with no source at all — a start that threw before
+   * spawning, or a stop whose child never delivered its signal.
    *
-   * The `destroyed` early return is why a failed stream cannot report itself from
-   * here: an `error` auto-destroys the stream, so by the time {@link finalize}
-   * reaches this it returns without ever awaiting `finished`. {@link finalize}
-   * therefore re-throws the error {@link open}'s listener recorded, after its
-   * `finally`.
+   * Waiting for `'close'` rather than `finish` — and not skipping the wait on
+   * an already-finished or already-destroyed stream — is what closes the
+   * close-time window: auto-destroy runs `close(2)` *after* `finish`, so a
+   * stream can finish cleanly and still error on close (EIO), and deciding
+   * before that error has been delivered turns it into a race. After `'close'`,
+   * every error the stream will ever emit has been recorded, so {@link
+   * finalize}'s decision reads settled state.
+   *
+   * The wait itself never rejects — a plain `'close'` listener, deliberately
+   * not `finished()` (rejects on an errored stream) and not `events.once`
+   * (rejects when `'error'` is emitted while waiting): the failure already
+   * lives in the recorded entry error and `stream.errored`, and {@link
+   * finalize}'s decision is what reports it.
    */
   private async _endAndFlush(stream: fs.WriteStream): Promise<void> {
-    if (stream.writableFinished || stream.destroyed) {
-      return;
-    }
-    if (!stream.writableEnded) {
+    if (!stream.writableEnded && !stream.destroyed) {
       stream.end();
     }
-    await finished(stream);
+    if (!stream.closed) {
+      await new Promise<void>((resolve) => {
+        stream.once('close', resolve);
+      });
+    }
   }
 }

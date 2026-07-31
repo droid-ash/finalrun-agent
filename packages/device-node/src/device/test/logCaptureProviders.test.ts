@@ -287,6 +287,40 @@ for (const platform of ['Android', 'iOS'] as const) {
     assert.match(stopped.message ?? '', /ENOENT/);
     assert.equal(liveStreamCount(providerRegistry(provider)), 0);
   });
+
+  test(`${platform} log capture quiet-first stop path reports failure over an errored stream`, async () => {
+    const outputFilePath = await createUnopenableFilePath();
+    const childProcess = new FakeChildProcess('signal-undelivered');
+    const provider = createProvider(childProcess);
+
+    await startCapture(provider, childProcess, outputFilePath);
+
+    const [openError] = await once(
+      trackedStream(providerRegistry(provider), outputFilePath),
+      'error',
+    );
+    assert.match(String(openError), /ENOENT/);
+
+    childProcess.stdout.end();
+
+    const stopped = await provider.stopLogCapture({
+      process: childProcess as unknown as ChildProcess,
+      outputFilePath,
+    });
+
+    // The undelivered SIGINT makes this a quiet-first path: `finalizeQuietly`
+    // consumes the recorded ENOENT silently (it drops the registry entry), so a
+    // later `finalize` for the same path would find nothing — safe only because
+    // the path is already reporting a failure of its own. That invariant, every
+    // quiet-first path returning `success: false` by itself, is what makes the
+    // documented quiet-before-loud ordering hazard in `logWriteStream.ts` safe.
+    // Pinned deliberately WITHOUT asserting what a later stop over the swallowed
+    // error returns: the swallow-then-resolve sequence is an accepted, documented
+    // accident, not a contract.
+    assert.equal(stopped.success, false);
+    assert.match(stopped.message ?? '', /Failed to send SIGINT/);
+    assert.equal(liveStreamCount(providerRegistry(provider)), 0);
+  });
 }
 
 test('LogWriteStreamRegistry ends and untracks the stream when the source errors', async () => {
@@ -346,9 +380,10 @@ test('LogWriteStreamRegistry finalize rejects with the error a failed open recor
   const [openError] = await once(stream, 'error');
   assert.match(String(openError), /ENOENT/);
 
-  // The error auto-destroyed the stream, so `_endAndFlush` early-returns and the
-  // flush never observes it: without the recorded error, the stop would resolve
-  // and report success over a log file that was never written.
+  // The ENOENT destroyed the stream, so the terminal-state decision would reject
+  // via `stream.errored` even with no record. What the record adds — and what
+  // this pins — is precedence: the rejection carries the FIRST error the stream
+  // emitted, not whichever one happened to destroy it.
   await assert.rejects(registry.finalize(outputFilePath), /ENOENT/);
   assert.equal(liveStreamCount(registry), 0);
 });
@@ -373,13 +408,16 @@ test('LogWriteStreamRegistry records only the first error a stream emits', async
   const stream = registry.open(outputFilePath);
 
   // `??=` is what makes this hold: the first error is the one that explains the
-  // failure and everything after it is fallout on an already-destroyed stream.
-  // Emitted directly rather than provoked, because two real failures on one stream
-  // cannot be ordered deterministically — and a direct `emit` leaves the stream
-  // undestroyed, so the flush below still runs and the recorded error is the only
-  // thing that can reject.
+  // failure and everything after it is fallout on an already-doomed stream.
+  // Emitted directly rather than provoked, because two real failures on one
+  // stream cannot be ordered deterministically. The destroy is what makes the
+  // stream genuinely failing — `finish` can no longer fire, so `finalize` must
+  // reject — and it carries a THIRD error so the assertion also pins precedence:
+  // the recorded first error outranks `stream.errored` (the destroy reason,
+  // which is fallout) in the rejection.
   stream.emit('error', new Error('first failure'));
   stream.emit('error', new Error('second failure'));
+  stream.destroy(new Error('destroy fallout'));
 
   await assert.rejects(registry.finalize(outputFilePath), /first failure/);
   assert.equal(liveStreamCount(registry), 0);
@@ -397,6 +435,76 @@ test('LogWriteStreamRegistry finalize resolves and untracks a stream that wrote 
 
   assert.equal(stream.writableFinished, true);
   assert.equal(await readFile(outputFilePath, 'utf8'), 'one logcat line\n');
+  assert.equal(liveStreamCount(registry), 0);
+});
+
+test('LogWriteStreamRegistry finalize resolves a stream that flushed cleanly despite a stale non-destroying error', async () => {
+  const outputFilePath = await createOutputFilePath();
+  const registry = new LogWriteStreamRegistry();
+  const stream = registry.open(outputFilePath);
+  stream.write('one logcat line\n');
+
+  // A bare emit is the only construction that reaches this state: every real fs
+  // error either destroys the stream (`autoDestroy: true`) or arrives at close
+  // time, setting `stream.errored`. The stream itself is untouched, so the
+  // flush below completes and the file on disk is genuinely whole — the state
+  // in which the old unconditional rejection contradicted the file's own
+  // contract (a log that could not be flushed is a failed stop; this one was
+  // flushed).
+  stream.emit('error', new Error('stale failure'));
+
+  const warnings: string[] = [];
+  const capturingSink: LoggerSink = (entry) => {
+    warnings.push(entry.message);
+  };
+  Logger.addSink(capturingSink);
+  try {
+    await registry.finalize(outputFilePath);
+  } finally {
+    Logger.removeSink(capturingSink);
+  }
+
+  assert.equal(stream.writableFinished, true);
+  assert.equal(await readFile(outputFilePath, 'utf8'), 'one logcat line\n');
+  assert.equal(liveStreamCount(registry), 0);
+  // The stale record is not silently swallowed: the warning names the file and
+  // the error it is overriding.
+  assert.ok(
+    warnings.some((m) => m.includes(outputFilePath) && m.includes('stale failure')),
+    `expected a warning naming ${outputFilePath} and the stale error, got: ${JSON.stringify(warnings)}`,
+  );
+});
+
+test('LogWriteStreamRegistry finalize rejects deterministically on a close-time error after a clean finish', async () => {
+  const outputFilePath = await createOutputFilePath();
+  const registry = new LogWriteStreamRegistry();
+  const stream = registry.open(outputFilePath);
+
+  // Forces the failure auto-destroy's `close(2)` would report. `_destroy` is
+  // the documented Writable teardown seam: the real teardown still runs (the fd
+  // is actually closed) and the callback is then handed the EIO the OS would
+  // have returned, which Node surfaces as `error` → `errored` → `close`.
+  // `stream.destroy(err)` after `finish` cannot pin this — it races
+  // auto-destroy's own `destroy()` call and loses nondeterministically.
+  const realDestroy = stream._destroy.bind(stream);
+  stream._destroy = (error, callback) => {
+    realDestroy(error, () => {
+      callback(error ?? new Error('EIO: i/o error, close'));
+    });
+  };
+
+  stream.write('one logcat line\n');
+  stream.end();
+  await once(stream, 'finish');
+
+  // `finalize` starts with `writableFinished` already true and the close-time
+  // error not yet delivered — exactly the window the pre-fix code raced: its
+  // `_endAndFlush` early-returned on a finished stream and the recorded-error
+  // check then resolved or rejected by whether the close callback had run yet.
+  // Awaiting the terminal 'close' makes this rejection deterministic.
+  await assert.rejects(registry.finalize(outputFilePath), /EIO/);
+
+  assert.equal(stream.writableFinished, true, 'the flush itself completed cleanly');
   assert.equal(liveStreamCount(registry), 0);
 });
 
