@@ -9,8 +9,8 @@ progress:
     apply: done
     review: done
     hydrate: done
-    ship: active
-    review-pr: pending
+    ship: done
+    review-pr: active
 plan:
     generated: true
     task_count: 11
@@ -33,19 +33,21 @@ stage_metrics:
     apply: {started_at: "2026-07-31T18:22:42Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T18:35:36Z"}
     review: {started_at: "2026-07-31T18:35:36Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T18:47:52Z"}
     hydrate: {started_at: "2026-07-31T18:47:52Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T18:55:03Z"}
-    ship: {started_at: "2026-07-31T18:55:03Z", driver: fab-fff, iterations: 1}
-prs: []
+    ship: {started_at: "2026-07-31T18:55:03Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T18:57:30Z"}
+    review-pr: {started_at: "2026-07-31T18:57:30Z", driver: git-pr, iterations: 1}
+prs:
+    - https://github.com/droid-ash/finalrun-agent/pull/178
 change_type_source: explicit
 true_impact:
-    added: 0
-    deleted: 0
-    net: 0
+    added: 803
+    deleted: 20
+    net: 783
     tests:
-        added: 0
+        added: 112
         deleted: 0
-        net: 0
-    computed_at: "2026-07-31T18:55:03Z"
-    computed_at_stage: hydrate
+        net: 112
+    computed_at: "2026-07-31T18:57:30Z"
+    computed_at_stage: ship
 summary: 'Bound redactResolvedValue''s substring matching: placeholder tokens pass through whole and secret values under 3 chars are never redacted, documented across common/cli memory'
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T18:55:03Z
+last_updated: 2026-07-31T18:57:30Z
