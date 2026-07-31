@@ -125,9 +125,13 @@ computation lives: Android's `TestUtils.calculateFrameDelay` uses `1000.0 / fps.
 Swift `XCViewHierarchyManager` cites it.
 
 `fps` MUST be clamped to `1...60` (`streamingFpsRange`), matching Android's `coerceIn(1, 60)`: below 1
-the interval is unbounded, above 60 the hierarchy snapshot cannot keep up. An omitted `fps` defaults
-to `1` (`defaultStreamingFps`) — the proto's documented 24 is not adopted, because changing the
-default is a separate behaviour change from fixing the arithmetic.
+the interval is unbounded, above 60 the hierarchy snapshot cannot keep up. An omitted `fps` on the
+gRPC `StartStreaming` path defaults to `24` on both drivers (`GrpcDriverServer.swift`'s
+`defaultStreamingFps`, and the inline `if (request.hasFps()) request.fps else 24` in Android's
+`DriverServiceImpl.startStreaming` — both adopting the proto's documented default);
+`XCViewHierarchyManager`'s `defaultStreamingFps` of `1` defaults only the legacy WebSocket timer
+path. The two are deliberately not aligned — aligning them would change the RPC's behaviour rather
+than just guard its arithmetic.
 
 #### Scenario: streaming at 24 fps
 

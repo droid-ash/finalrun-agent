@@ -1,6 +1,6 @@
 ---
 type: memory
-description: "UI-hierarchy parse contract (`common/src/models/Hierarchy.ts`, consumed by 16 files in goal-executor/device-node): `fromJsonString` dispatches array→flat / object→tree, and the paths are deliberately not equivalent — only the flat path shortens `:id/` ids, infers `isImage` from the class, takes `identifier`; alias resolution is `??`-presence via `_pick`/`orDefault`, never truthiness, so `false` and `''` survive; bounds are a 4-array or a left/top/right/bottom object; reads are unvalidated casts."
+description: "UI-hierarchy parse contract (`common/src/models/Hierarchy.ts`, consumed by four goal-executor files): `fromJsonString` dispatches array→flat / object→tree, and the paths are deliberately not equivalent — only the flat path shortens `:id/` ids, infers `isImage` from the class, takes `identifier`; alias resolution is `??`-presence via `_pick`/`orDefault`, never truthiness, so `false` and `''` survive; bounds are a 4-array or a left/top/right/bottom object; reads are unvalidated casts."
 ---
 # UI Hierarchy Parsing (common)
 
@@ -10,9 +10,16 @@ description: "UI-hierarchy parse contract (`common/src/models/Hierarchy.ts`, con
 
 `packages/common/src/models/Hierarchy.ts` turns the driver's UI-hierarchy JSON into `HierarchyNode`s
 and the flattened list that `toPromptElementsForPlanner` / `toPromptElementsForGrounder` build
-planner and grounder prompts from. It is the most-depended-on parser in the repo — 16 files across
-`goal-executor` and `device-node` consume `Hierarchy`/`HierarchyNode` — and its one production entry
-point is `Hierarchy.fromJsonString`, called on the device-capture path in
+planner and grounder prompts from. Every consumer of `Hierarchy`/`HierarchyNode` lives in
+`goal-executor` — `ai/AIAgent.ts`, `ActionExecutor.ts`, `TestExecutor.ts` and
+`GrounderResponseConverter.ts`, each importing through the `@finalrun/common` barrel.
+**`device-node` consumes neither type**, even though it is the client that fetches every payload
+(`GrpcDriverClient.getHierarchy` / `getScreenshotAndHierarchy`) and owns a
+`DeviceScreenshotAndHierarchy` interface of its own: the hierarchy crosses that package as an opaque
+JSON `string` — the declared field type in both `GrpcDriverClient`'s response and
+`DeviceRuntime.DeviceScreenshotAndHierarchy` — and only `goal-executor` parses it. So a grep for
+`Hierarchy` under `device-node` hits RPC names and that local interface, never this type.
+The one production entry point is `Hierarchy.fromJsonString`, called on the device-capture path in
 `packages/goal-executor/src/TestExecutor.ts`. A behaviour change here surfaces as a grounding
 failure at runtime rather than as a test failure, so the parse contract is pinned by
 mutation-verified characterization tests in `packages/common/src/models/test/Hierarchy.test.ts`

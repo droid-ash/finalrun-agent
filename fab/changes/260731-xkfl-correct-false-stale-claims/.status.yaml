@@ -1,0 +1,51 @@
+id: xkfl
+name: 260731-xkfl-correct-false-stale-claims
+created: 2026-07-31T12:04:07Z
+created_by: droid-ash
+change_type: docs
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 11
+    acceptance_count: 14
+    acceptance_completed: 14
+confidence:
+    certain: 8
+    confident: 1
+    tentative: 0
+    unresolved: 0
+    score: 5.0
+    fuzzy: true
+    dimensions:
+        signal: 87.2
+        reversibility: 87.8
+        competence: 90.6
+        disambiguation: 84.4
+stage_metrics:
+    intake: {started_at: "2026-07-31T12:04:07Z", driver: fab-new, iterations: 1, completed_at: "2026-07-31T12:07:36Z"}
+    apply: {started_at: "2026-07-31T12:36:23Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T12:43:42Z"}
+    review: {started_at: "2026-07-31T12:43:42Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T12:55:18Z"}
+    hydrate: {started_at: "2026-07-31T12:55:18Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T13:04:16Z"}
+    ship: {started_at: "2026-07-31T13:04:16Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-31T13:04:16Z"
+    computed_at_stage: hydrate
+summary: 'Corrected false and stale factual claims across fab policy, source comments, the codebase walkthrough and memory: dropped a fabricated drivers.yml comment ratio, past-tensed the shipped restatement sweep, repointed twice-rotted logger.ts citations to line-free anchors, replaced five used-by attributions naming nonexistent Dart-predecessor symbols, and re-attributed the streaming fps defaults (gRPC StartStreaming 24, legacy WebSocket 1).'
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-31T13:04:16Z

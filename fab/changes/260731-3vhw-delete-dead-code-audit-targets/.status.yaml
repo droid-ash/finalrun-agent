@@ -10,7 +10,7 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 7
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-31T02:19:15Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T02:29:55Z"}
     hydrate: {started_at: "2026-07-31T02:29:55Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T02:33:34Z"}
     ship: {started_at: "2026-07-31T02:33:34Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T02:35:20Z"}
-    review-pr: {started_at: "2026-07-31T02:35:20Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-31T02:35:20Z", driver: git-pr, iterations: 1, completed_at: "2026-07-31T12:20:33Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/170
 change_type_source: explicit
@@ -50,4 +50,4 @@ true_impact:
     computed_at_stage: ship
 summary: 'Deleted 1,864 lines of dead code: TestActions.kt (whole file), XCTestManager.swift commented-out code blocks, 30 unreferenced constants.ts exports, and isInteractive/resolveCliCacheRoot in packages/cli'
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T02:35:20Z
+last_updated: 2026-07-31T12:20:33Z

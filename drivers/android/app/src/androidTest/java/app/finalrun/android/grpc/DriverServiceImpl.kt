@@ -36,8 +36,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * gRPC service implementation for the Android driver.
  *
- * This replaces ActionProcessor and handles all incoming RPC calls from the
- * TypeScript client (packages/device-node).
+ * Handles all incoming RPC calls from the TypeScript client
+ * (packages/device-node).
  * Each method corresponds to an action that can be performed on the device.
  */
 class DriverServiceImpl : DriverServiceGrpc.DriverServiceImplBase() {

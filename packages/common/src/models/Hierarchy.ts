@@ -1,6 +1,7 @@
 // Port of common/model/Hierarchy.dart — MINIMAL: parse + flatten + node properties
-// The Dart file is ~108KB. We port only the subset used by FinalRunAgent and
-// HeadlessActionExecutor for AI prompt building and grounding.
+// We port only the subset the goal-executor (AIAgent, ActionExecutor,
+// TestExecutor, GrounderResponseConverter) needs for AI prompt building
+// and grounding.
 
 import { PLATFORM_ANDROID, PLATFORM_IOS } from '../constants.js';
 

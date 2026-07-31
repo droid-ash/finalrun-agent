@@ -1,0 +1,14 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-31T12:04:07Z"}
+{"args":"Correct false and stale factual claims across comments, docs and policy (items from adversarial review of PRs #168-#175, re-verified at main 91b2683): code-quality.md drivers.yml false 67/18 ratio; code-review.md stale \"planned\" sweep (shipped as #171); env.ts false constitution citation; logger.ts citation rot in logWriteStream.ts + log-capture.md; false used-by headers in constants.ts, Hierarchy.ts, DriverServiceImpl.kt, GrpcDriverServer.kt; grpc-contract.md wrong fps default; codebase-walkthrough.md five false claims; 3vhw .status.yaml stuck at review-pr active. Docs/comments only, no runtime changes. Do not commit fab/backlog.md.","cmd":"fab-new","event":"command","ts":"2026-07-31T12:04:07Z"}
+{"delta":"+5.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-31T12:05:42Z"}
+{"delta":"+0.0","event":"confidence","score":5,"trigger":"calc-score","ts":"2026-07-31T12:07:03Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-31T12:07:26Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T12:07:36Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T12:22:22Z"}
+{"event":"review","result":"failed","ts":"2026-07-31T12:36:23Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T12:36:23Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T12:43:42Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-31T12:55:18Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T12:55:18Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T12:56:14Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-31T13:04:16Z"}

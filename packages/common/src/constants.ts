@@ -1,5 +1,5 @@
-// Port of constants/lib/constants.dart — only the subset used by
-// CLI + goal-executor + device-node.
+// Port of constants/lib/constants.dart — only the subset this repo's
+// TypeScript packages actually use.
 
 // ============================================================================
 // Platform identifiers
@@ -8,7 +8,10 @@ export const PLATFORM_ANDROID = 'android';
 export const PLATFORM_IOS = 'ios';
 
 // ============================================================================
-// AI feature names — used by FinalRunAgent to select prompts/models
+// AI feature names — used by the goal-executor (AIAgent, VisualGrounder,
+// ActionExecutor) to select prompts/models per feature, by ai/schemas.ts to
+// key FEATURE_SCHEMAS (the per-feature response schemas), and by workspace.ts
+// to key per-feature config overrides
 // ============================================================================
 export const FEATURE_PLANNER = 'planner';
 export const FEATURE_GROUNDER = 'grounder';
@@ -150,8 +153,10 @@ export const DEFAULT_MAX_ITERATIONS = 110;
 export const DEFAULT_GRPC_PORT_START = 50051;
 
 // ============================================================================
-// Planner output action keys — used by HeadlessGoalExecutor to parse planner response
-// These must match the strings the planner LLM outputs.
+// Planner output action keys — the normalized `act` values AIAgent maps the
+// planner's snake_case action_type strings onto (see FIXED_PROMPT_ACTIONS in
+// AIAgent.ts); ActionExecutor routes its handler map on them and TestExecutor
+// checks the completed/failed terminals.
 // ============================================================================
 export const PLANNER_ACTION_TAP = 'tap';
 export const PLANNER_ACTION_LONG_PRESS = 'longPress';
