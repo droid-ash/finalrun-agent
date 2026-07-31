@@ -10,7 +10,7 @@ progress:
     review: done
     hydrate: done
     ship: done
-    review-pr: active
+    review-pr: done
 plan:
     generated: true
     task_count: 6
@@ -34,7 +34,7 @@ stage_metrics:
     review: {started_at: "2026-07-31T11:14:29Z", driver: fab-fff, iterations: 2, completed_at: "2026-07-31T11:23:33Z"}
     hydrate: {started_at: "2026-07-31T11:23:33Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:29:29Z"}
     ship: {started_at: "2026-07-31T11:29:29Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:32:11Z"}
-    review-pr: {started_at: "2026-07-31T11:32:11Z", driver: git-pr, iterations: 1}
+    review-pr: {started_at: "2026-07-31T11:32:11Z", driver: git-pr, iterations: 1, completed_at: "2026-07-31T11:49:39Z"}
 prs:
     - https://github.com/droid-ash/finalrun-agent/pull/175
 true_impact:
@@ -49,4 +49,4 @@ true_impact:
     computed_at_stage: ship
 summary: 'Documented the secret-value exposure chain: new cli/test-compiler (compile-time scope, runtime prompt path, AIAgent redaction seam, residuals), scope carve-outs on cli/report-writer, downstream-redaction pointer on common/hierarchy'
 # true_impact: lazily created on first stage-finish that computes it (no placeholder here).
-last_updated: 2026-07-31T11:32:11Z
+last_updated: 2026-07-31T11:49:39Z
