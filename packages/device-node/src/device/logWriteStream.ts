@@ -133,7 +133,11 @@ export class LogWriteStreamRegistry {
    * A write error rejects, because a log that could not be flushed is a failed
    * stop, not a successful one — but the stream is ended and untracked first, on
    * every path. That holds for an error {@link open}'s listener recorded long
-   * before this call as much as for one raised by the flush here.
+   * before this call as much as for one raised by the flush here. It holds even
+   * when the flush itself later succeeded (`writableFinished` true): an errored
+   * stream's contents are not trustworthy, and with real errors that state is
+   * unreachable anyway — `fs.WriteStream` has `autoDestroy: true`, so only a
+   * bare `emit('error')` can leave the stream alive to finish its flush.
    */
   async finalize(outputFilePath: string, source?: Readable | null): Promise<void> {
     const entry = this._streams.get(outputFilePath);
@@ -184,6 +188,18 @@ export class LogWriteStreamRegistry {
    * Shared here rather than repeated in each provider for the same reason the
    * rest of this bookkeeping is: the two versions would differ only by a log
    * prefix, and the output file path already identifies the capture.
+   *
+   * Ordering matters across the two entry points: a recorded error is consumed
+   * by whichever finalization runs first ({@link finalize} drops the entry in
+   * its `finally`), so a quiet call before a loud one for the same path
+   * swallows the error here and leaves the later {@link finalize} to find an
+   * untracked path and resolve — success over a possibly-unwritten file. A
+   * caller that needs the error surfaced must therefore call {@link finalize}
+   * before any `finalizeQuietly` for the same path. What guarantees that today
+   * lives outside this file: both providers' `stopLogCapture` run the loud call
+   * on the success path before any quiet catch-path call, and
+   * `LogCaptureManager`'s `_stoppedTestCases` set prevents the second stop that
+   * could otherwise reach quiet-then-loud.
    */
   async finalizeQuietly(outputFilePath: string, source?: Readable | null): Promise<void> {
     try {

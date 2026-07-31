@@ -81,6 +81,19 @@ whether the success path already did. Untracking and ending run in a `finally`, 
 cannot strand a stream that nothing else holds a handle on. A stream destroyed *by an error* is the
 one case that skips the flush and still fails: it rejects with the recorded error (below).
 
+**Which of the two entry points the success path calls is only observable from outside a provider, so
+it is pinned there.** A stop over a write stream whose asynchronous `open(2)` failed returns
+`DeviceNodeResponse { success: false }` with a message naming the error and leaves no tracked entry
+behind — the caller-visible half of the contract. Registry-level tests cannot reach it: they call
+`finalize` themselves, so replacing the success path's `finalize` with `finalizeQuietly` in
+`AndroidLogcatProvider.stopLogCapture` and `IOSLogProvider.stopLogCapture` — which restores a
+successful stop over a log file that was never written — leaves every one of them green. The two
+platform-parameterized failing-stream tests in
+`packages/device-node/src/device/test/logCaptureProviders.test.ts` are what fail on that swap, and
+are mutation-verified against exactly it. They assert the response, not registry internals: a real
+unopenable path (its parent directory absent), the stream's `error` event awaited deterministically
+rather than slept on, and `liveStreamCount` back to zero.
+
 #### Scenario: buffered output is still complete on disk after the stop
 
 - **GIVEN** a log capture whose child process has written data that is still buffered
@@ -98,6 +111,14 @@ one case that skips the flush and still fails: it rejects with the recorded erro
 - **GIVEN** a path that was never opened, or one an earlier stop already finalized
 - **WHEN** finalization runs
 - **THEN** it resolves without throwing and without hanging
+
+#### Scenario: the stop's write stream never opened
+
+- **GIVEN** a capture started against an output path whose parent directory does not exist, so the
+  stream's asynchronous `open(2)` fails with `ENOENT` after the start has already returned success
+- **WHEN** `stopLogCapture` runs and its drain reaches EOF
+- **THEN** the provider's response is `success: false` with a message naming the `ENOENT`, and the
+  registry tracks no stream for that path
 
 ### Requirement: The drain wait is bounded, and its timeout degrades to a truncated log
 
@@ -278,3 +299,61 @@ error is logged rather than thrown — that is `finalizeQuietly`, and collapsing
 distinction between a stop that failed and a path already reporting a failure.
 
 *Introduced by*: 260730-eyvt-ci-cost-guards-carried-defects
+
+### The recorded-error rejection is unconditional, with no `writableFinished` guard
+
+**Decision**: `finalize` re-throws `entry.error` whenever one was recorded, without consulting
+`stream.writableFinished`. A stop whose flush completed cleanly still fails if the stream ever
+emitted `error`, and nothing clears the record once `_endAndFlush` resolves.
+
+**Why**: An `error` event means the file is **not known to be complete** — the invariant the callers
+actually depend on, since the CLI copies the file immediately after the stop resolves. Rejecting on
+any recorded error errs toward a false failure of a diagnostic artifact; a guard errs toward a false
+success over a possibly-corrupt file, which is the exact shape of the defect the `open()` listener
+exists to close. The reachability argument only runs one way, and it cuts the same direction: in the
+**error-then-flush** order a guard would change nothing observable with real errors, because
+`fs.WriteStream` has `autoDestroy: true` — every genuine failure (`ENOENT` on open, `ENOSPC` on
+write) destroys the stream, so `writableFinished` cannot go true afterwards, and only a bare
+`stream.emit('error', …)` reaches that state (which is how the existing pinning test constructs it,
+two real failures not being deterministically orderable). The **flush-then-error** order *is*
+reachable: a close-time error — an `EIO` from the `close(2)` auto-destroy performs after `finish` —
+can be recorded while `writableFinished` is already true, and a guard would silently drop precisely
+that error. So the guard is either inert or harmful.
+
+**Rejected**: (a) guarding the re-throw on `writableFinished` — drops close-time errors, and flips
+the outcome of the existing test that pins first-error-wins *and* the rejection together; (b)
+clearing `entry.error` once the flush resolves — the same silent drop by another route; (c) relying on
+the surrounding doc prose alone — it covers an error recorded "long before this call" but not the
+flush-succeeded case, which is the one a reader would otherwise take for a bug.
+
+*Introduced by*: 260731-cjx8-provider-log-stop-test-coverage
+
+### The recorded error is consumed by the first finalization, and call ordering is documented rather than enforced
+
+**Decision**: A recorded error survives only until the first finalization consumes it — `finalize`
+drops the entry in its `finally` — so a `finalizeQuietly` running *before* a `finalize` for the same
+path swallows the error and leaves the later `finalize` to find an untracked path and resolve. The
+required ordering (`finalize` before any `finalizeQuietly` for the same path) is stated on
+`finalizeQuietly`'s doc comment; `logWriteStream.ts` enforces nothing.
+
+**Why**: What upholds the ordering lives outside the registry, which is exactly why a comment is the
+right carrier — a reader of `finalizeQuietly` cannot recover it from the code in front of them. Both
+providers' `stopLogCapture` run the loud call on the success path before any quiet catch-path call,
+and every quiet-first path (a start that threw, a stop whose SIGINT was never delivered) returns a
+failure on its own, so no success is ever reported over a swallowed error. The one remaining sequence
+that could reach quiet-then-loud is a second stop for the same capture, which
+`LogCaptureManager`'s `_stoppedTestCases` set covers **sequentially only**: the `has()` early-return
+and the `add()` inside `_finalizeStoppedLogCapture` straddle the awaited
+`provider.stopLogCapture(…)`, so overlapping stop/abort calls for one `(runId, testId)` are a
+check-then-act race the set does not close. Enforcing the invariant inside the registry costs more
+than the hazard: an errored entry kept as a tombstone is a leak, and the registry is a per-provider
+instance precisely so entries are collected with their owner.
+
+**Rejected**: (a) tombstoning errored entries so a later `finalize` still observes the error —
+reintroduces the unbounded growth the per-instance registry design rejects; (b) making
+`finalizeQuietly` preserve the entry — breaks its "end the stream and drop its entry" contract, which
+is what every already-failing path calls it for; (c) a test pinning today's second-stop-over-a-failed-
+stream success — cements an accident as a contract, which is worse than an accepted, documented
+hazard.
+
+*Introduced by*: 260731-cjx8-provider-log-stop-test-coverage

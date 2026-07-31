@@ -1,0 +1,51 @@
+id: cjx8
+name: 260731-cjx8-provider-log-stop-test-coverage
+created: 2026-07-31T10:35:17Z
+created_by: droid-ash
+change_type: test
+issues: []
+progress:
+    intake: done
+    apply: done
+    review: done
+    hydrate: done
+    ship: active
+    review-pr: pending
+plan:
+    generated: true
+    task_count: 5
+    acceptance_count: 11
+    acceptance_completed: 11
+confidence:
+    certain: 3
+    confident: 3
+    tentative: 0
+    unresolved: 0
+    score: 4.7
+    fuzzy: true
+    dimensions:
+        signal: 85.0
+        reversibility: 80.0
+        competence: 88.3
+        disambiguation: 79.2
+stage_metrics:
+    intake: {started_at: "2026-07-31T10:35:17Z", driver: fab-new, iterations: 1, completed_at: "2026-07-31T10:40:26Z"}
+    apply: {started_at: "2026-07-31T10:40:26Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:47:41Z"}
+    review: {started_at: "2026-07-31T10:47:41Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T10:59:04Z"}
+    hydrate: {started_at: "2026-07-31T10:59:04Z", driver: fab-fff, iterations: 1, completed_at: "2026-07-31T11:03:52Z"}
+    ship: {started_at: "2026-07-31T11:03:52Z", driver: fab-fff, iterations: 1}
+prs: []
+change_type_source: explicit
+true_impact:
+    added: 0
+    deleted: 0
+    net: 0
+    tests:
+        added: 0
+        deleted: 0
+        net: 0
+    computed_at: "2026-07-31T11:03:52Z"
+    computed_at_stage: hydrate
+summary: Pinned the caller-visible finalize-vs-finalizeQuietly stop contract with two mutation-verified provider-level failing-stream tests, and documented the keep-unconditional-rejection and once-consumed-recorded-error decisions
+# true_impact: lazily created on first stage-finish that computes it (no placeholder here).
+last_updated: 2026-07-31T11:03:52Z
