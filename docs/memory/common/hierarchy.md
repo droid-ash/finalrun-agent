@@ -18,6 +18,13 @@ failure at runtime rather than as a test failure, so the parse contract is pinne
 mutation-verified characterization tests in `packages/common/src/models/test/Hierarchy.test.ts`
 (44 tests, green against the pre-refactor source — see [/ci/pr-quality-gate.md](/ci/pr-quality-gate.md)).
 
+Node text reaches the model provider verbatim from here — a field holding a typed secret included.
+Redaction for that is downstream and generic over string fields: `AIAgent` rewrites exact resolved
+secret values in the records these two builders return, before serializing them, whenever runtime
+bindings are wired ([/cli/test-compiler.md](/cli/test-compiler.md)). It never mutates the
+`Hierarchy`, which keeps holding the real on-screen values — so this file has no bindings access and
+needs none.
+
 ## Requirements
 
 ### Requirement: Two parse paths, deliberately not equivalent

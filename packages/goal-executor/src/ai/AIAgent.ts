@@ -43,10 +43,12 @@ import {
   PLANNER_ACTION_FAILED,
   PLANNER_ACTION_DEEPLINK,
   parseModel,
+  redactResolvedValue,
   type FeatureName,
   type FeatureOverrides,
   type ModelDefaults,
   type ReasoningLevel,
+  type RuntimeBindings,
 } from '@finalrun/common';
 import {
   describeLLMTrace,
@@ -204,6 +206,7 @@ export class AIAgent {
   private _apiKeys: Record<string, string>;
   private _defaults: ModelDefaults;
   private _features: FeatureOverrides;
+  private _bindings?: RuntimeBindings;
 
   private _promptCache: Map<string, string> = new Map();
   // Cached Vercel AI SDK clients, keyed by provider/model
@@ -214,10 +217,64 @@ export class AIAgent {
     apiKeys: Record<string, string>;
     defaults: ModelDefaults;
     features?: FeatureOverrides;
+    /**
+     * Enables prompt-path secret redaction (see _redactPromptElements).
+     * Without bindings, prompts are assembled unredacted — callers that hold
+     * runtime secrets (sessionRunner) must pass them through.
+     */
+    bindings?: RuntimeBindings;
   }) {
     this._apiKeys = params.apiKeys;
     this._defaults = params.defaults;
     this._features = params.features ?? {};
+    this._bindings = params.bindings;
+  }
+
+  /**
+   * Prompt-path secret redaction. The compile-time guard in
+   * packages/cli/src/testCompiler.ts keeps ${secrets.*} values out of the
+   * compiled objective only: once ActionExecutor._executeType types a resolved
+   * secret into a field, the next captured hierarchy carries the value in its
+   * node text/hint/error fields, and the model can echo an on-screen secret
+   * into remember/history. These two helpers rewrite exact occurrences of
+   * resolved secret values back to their ${secrets.KEY} placeholder — the same
+   * logical token the compiled objective's Execution Rules already teach the
+   * model — before the prompt leaves the process.
+   *
+   * Every input is redacted individually BEFORE assembly and serialization —
+   * deliberately, there is NO pass over the assembled prompt text. A
+   * post-JSON.stringify pass fails in both directions: it rewrites structural
+   * values that happen to equal a secret (a numeric PIN equal to a bounds
+   * coordinate corrupts the ui_elements JSON), and it misses exact secrets
+   * that serialization escaped (`"` → `\"`, `\` → `\\`). Only serialized
+   * copies are touched — the Hierarchy itself is never mutated, so
+   * index-based grounding (flattenedHierarchy[idx] → bounds → tap point)
+   * still resolves against the real on-screen values.
+   *
+   * Screenshots are NOT redacted here and DO still carry the secret to the
+   * provider — masking them needs visual field-region detection, and dropping
+   * them would blind the planner. Exact-match is also the ceiling: a value the
+   * app re-renders (truncated, reformatted, partially masked) is not caught.
+   */
+  private _redactPromptText(value: string): string {
+    if (!this._bindings) return value;
+    return redactResolvedValue(value, this._bindings) ?? value;
+  }
+
+  /** Per-element counterpart of _redactPromptText — see its doc comment. */
+  private _redactPromptElements(
+    elements: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    const bindings = this._bindings;
+    if (!bindings) return elements;
+    return elements.map((element) => {
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(element)) {
+        out[key] =
+          typeof value === 'string' ? redactResolvedValue(value, bindings) : value;
+      }
+      return out;
+    });
   }
 
   /**
@@ -388,27 +445,36 @@ export class AIAgent {
       userParts.push({ type: 'image', image: request.preActionScreenshot });
     }
 
-    let textPrompt = `Test objective: ${request.testObjective}\n`;
+    // Each free-text input is redacted on its own, before it meets any
+    // serialized JSON — see _redactPromptText for why there is no pass over
+    // the assembled prompt. History/remember can carry a secret the model
+    // transcribed from an earlier screenshot or hierarchy.
+    let textPrompt = `Test objective: ${this._redactPromptText(request.testObjective)}\n`;
     textPrompt += `Platform: ${request.platform}\n`;
 
     if (request.history) {
-      textPrompt += `\nHistory of actions taken so far:\n${request.history}\n`;
+      textPrompt += `\nHistory of actions taken so far:\n${this._redactPromptText(request.history)}\n`;
     }
 
     if (request.remember && request.remember.length > 0) {
-      textPrompt += `\nImportant context to remember:\n${JSON.stringify(request.remember)}\n`;
+      // Redacted per entry BEFORE JSON.stringify — escaping would otherwise
+      // hide a secret containing `"` or `\` from the exact-match rewrite.
+      const remember = request.remember.map((item) => this._redactPromptText(item));
+      textPrompt += `\nImportant context to remember:\n${JSON.stringify(remember)}\n`;
     }
 
     if (request.preContext) {
-      textPrompt += `\nPre-context:\n${request.preContext}\n`;
+      textPrompt += `\nPre-context:\n${this._redactPromptText(request.preContext)}\n`;
     }
 
     if (request.appKnowledge) {
-      textPrompt += `\nApp knowledge:\n${request.appKnowledge}\n`;
+      textPrompt += `\nApp knowledge:\n${this._redactPromptText(request.appKnowledge)}\n`;
     }
 
     if (request.hierarchy) {
-      const elements = request.hierarchy.toPromptElementsForPlanner(request.platform);
+      const elements = this._redactPromptElements(
+        request.hierarchy.toPromptElementsForPlanner(request.platform),
+      );
       textPrompt += `\nui_elements:\n${JSON.stringify(elements)}\n`;
     }
 
@@ -417,7 +483,9 @@ export class AIAgent {
     }
 
     if (request.postActionHierarchy) {
-      const postElements = request.postActionHierarchy.toPromptElementsForPlanner(request.platform);
+      const postElements = this._redactPromptElements(
+        request.postActionHierarchy.toPromptElementsForPlanner(request.platform),
+      );
       textPrompt += `\nPost-action ui_elements:\n${JSON.stringify(postElements)}\n`;
     }
 
@@ -436,7 +504,9 @@ export class AIAgent {
       Logger.i(formatGrounderRequest({
         step: request.traceStep,
         feature: request.feature,
-        act: request.act,
+        // Redacted like the prompt: console output never crosses
+        // reportWriter's redaction.
+        act: this._redactPromptText(request.act),
       }));
     }
 
@@ -491,19 +561,26 @@ export class AIAgent {
       userParts.push({ type: 'image', image: request.screenshot });
     }
 
-    let text = `act: ${request.act}\n`;
+    // `act` is planner-authored and can quote what the model read off a
+    // previous screen. Redacted on its own, before it meets the serialized
+    // element JSON — see _redactPromptText for why there is no assembled-text
+    // pass.
+    let text = `act: ${this._redactPromptText(request.act)}\n`;
 
     if (request.platform) {
       text += `platform: ${request.platform}\n`;
     }
 
     if (request.hierarchy) {
-      const elements = request.hierarchy.toPromptElementsForGrounder(request.platform);
+      const elements = this._redactPromptElements(
+        request.hierarchy.toPromptElementsForGrounder(request.platform),
+      );
       text += `\nui_elements:\n${JSON.stringify(elements)}\n`;
     }
 
     if (request.availableApps) {
-      text += `\navailable_apps:\n${JSON.stringify(request.availableApps)}\n`;
+      const apps = this._redactPromptElements(request.availableApps);
+      text += `\navailable_apps:\n${JSON.stringify(apps)}\n`;
     }
 
     userParts.push({ type: 'text', text });
@@ -980,16 +1057,23 @@ export class AIAgent {
       ? req.hierarchy.toPromptElementsForGrounder(req.platform).length
       : 0;
     parts.push(`hierarchy=${hierarchyCount}`);
-    const actSnippet = req.act.length > 80 ? `${req.act.slice(0, 80)}…` : req.act;
+    // Redact before truncating — a snippet cut mid-secret would no longer
+    // exact-match the value.
+    const act = this._redactPromptText(req.act);
+    const actSnippet = act.length > 80 ? `${act.slice(0, 80)}…` : act;
     parts.push(`act="${actSnippet}"`);
     return parts.join(' ');
   }
 
   private _detailPlannerRequest(req: PlannerRequest, prompt: string): string {
+    // Field-by-field redaction, mirroring _buildPlannerPrompt: firstFew and
+    // history reproduce hierarchy content, console output never crosses
+    // reportWriter's redaction, and redacting the stringified blob instead
+    // would hit the two failure modes described on _redactPromptText.
     const payload = {
       logContext: req.logContext,
       platform: req.platform,
-      goal: req.testObjective,
+      goal: this._redactPromptText(req.testObjective),
       screenshot: req.preActionScreenshot
         ? `<base64 ${req.preActionScreenshot.length} chars>`
         : null,
@@ -999,38 +1083,43 @@ export class AIAgent {
       hierarchy: req.hierarchy
         ? {
             count: req.hierarchy.toPromptElementsForPlanner(req.platform).length,
-            firstFew: req.hierarchy
-              .toPromptElementsForPlanner(req.platform)
-              .slice(0, 3),
+            firstFew: this._redactPromptElements(
+              req.hierarchy.toPromptElementsForPlanner(req.platform).slice(0, 3),
+            ),
           }
         : null,
-      history: req.history ? req.history.split('\n').filter(Boolean) : [],
-      remember: req.remember ?? [],
-      preContext: req.preContext ?? null,
-      appKnowledge: req.appKnowledge ?? null,
+      history: req.history
+        ? this._redactPromptText(req.history).split('\n').filter(Boolean)
+        : [],
+      remember: (req.remember ?? []).map((item) => this._redactPromptText(item)),
+      preContext: req.preContext ? this._redactPromptText(req.preContext) : null,
+      appKnowledge: req.appKnowledge ? this._redactPromptText(req.appKnowledge) : null,
       promptLength: prompt.length,
     };
     return `[AI plan detail] ${this._formatLogContext(req.logContext, req.traceStep)} ${JSON.stringify(payload, null, 2)}`;
   }
 
   private _detailGrounderRequest(req: GrounderRequest, prompt: string): string {
+    // Field-by-field redaction — see _detailPlannerRequest.
     const payload = {
       logContext: req.logContext,
       feature: req.feature,
       platform: req.platform,
-      act: req.act,
+      act: this._redactPromptText(req.act),
       screenshot: req.screenshot
         ? `<base64 ${req.screenshot.length} chars>`
         : null,
       hierarchy: req.hierarchy
         ? {
             count: req.hierarchy.toPromptElementsForGrounder(req.platform).length,
-            firstFew: req.hierarchy
-              .toPromptElementsForGrounder(req.platform)
-              .slice(0, 3),
+            firstFew: this._redactPromptElements(
+              req.hierarchy.toPromptElementsForGrounder(req.platform).slice(0, 3),
+            ),
           }
         : null,
-      availableApps: req.availableApps ?? null,
+      availableApps: req.availableApps
+        ? this._redactPromptElements(req.availableApps)
+        : null,
       promptLength: prompt.length,
     };
     return `[AI ground detail] ${this._formatLogContext(req.logContext, req.traceStep)} ${JSON.stringify(payload, null, 2)}`;
