@@ -1,0 +1,19 @@
+{"action":"enter","driver":"fab-new","event":"stage-transition","stage":"intake","ts":"2026-07-31T17:56:36Z"}
+{"args":"Fix verified prompt-corruption bug in secret redaction: redactResolvedValue unanchored substring matching corrupts prompt text (nested tokens when value equals key name; single-char values mangle prose). Decide shared-function vs call-site fix; add regression tests; fix two CodeRabbit doc findings on change 260731-gzzl intake/plan.","cmd":"fab-new","event":"command","ts":"2026-07-31T17:56:36Z"}
+{"delta":"+4.2","event":"confidence","score":4.2,"trigger":"calc-score","ts":"2026-07-31T17:59:03Z"}
+{"delta":"+0.0","event":"confidence","score":4.2,"trigger":"calc-score","ts":"2026-07-31T18:00:32Z"}
+{"cmd":"fab-fff","event":"command","ts":"2026-07-31T18:01:11Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T18:01:27Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T18:02:34Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T18:11:16Z"}
+{"event":"review","result":"failed","ts":"2026-07-31T18:22:41Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"apply","ts":"2026-07-31T18:22:42Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T18:27:51Z"}
+{"action":"re-entry","driver":"fab-fff","event":"stage-transition","stage":"review","ts":"2026-07-31T18:35:36Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T18:36:28Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"hydrate","ts":"2026-07-31T18:47:52Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T18:47:52Z"}
+{"cmd":"fab-continue","event":"command","ts":"2026-07-31T18:48:41Z"}
+{"action":"enter","driver":"fab-fff","event":"stage-transition","stage":"ship","ts":"2026-07-31T18:55:03Z"}
+{"action":"enter","driver":"git-pr","event":"stage-transition","stage":"review-pr","ts":"2026-07-31T18:57:30Z"}
+{"event":"review","result":"passed","ts":"2026-07-31T19:14:33Z"}

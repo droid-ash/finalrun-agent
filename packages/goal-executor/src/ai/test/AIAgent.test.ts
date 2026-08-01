@@ -698,6 +698,48 @@ test('AIAgent without bindings assembles prompts unredacted', () => {
   assert.ok(!text.includes('${secrets.PASSWORD}'));
 });
 
+test('AIAgent keeps a literal placeholder token in the objective intact when a secret value equals its key name', () => {
+  // Regression: the unanchored value match used to find PASSWORD inside the
+  // literal ${secrets.PASSWORD} token that testObjective deliberately carries
+  // and nest it into ${secrets.${secrets.PASSWORD}} — a token the model was
+  // never taught.
+  const agent = makeAgent({
+    bindings: { secrets: { PASSWORD: 'PASSWORD' }, variables: {} },
+  });
+
+  const { textPrompt } = buildPlannerPrompt(agent, {
+    testObjective: 'Type ${secrets.PASSWORD} into the field, then type PASSWORD again',
+    platform: 'android',
+  });
+
+  assert.ok(!textPrompt.includes('${secrets.${secrets.PASSWORD}}'));
+  assert.ok(
+    textPrompt.includes(
+      'Type ${secrets.PASSWORD} into the field, then type ${secrets.PASSWORD} again',
+    ),
+  );
+});
+
+test('AIAgent with a single-character secret value assembles the planner prompt byte-identically', () => {
+  // Regression: a 1-char value used to rewrite every occurrence of that
+  // character, mangling the whole prompt — including the word "secrets"
+  // inside other placeholder tokens.
+  const request: PlannerRequest = {
+    testObjective: 'Press the submit button and assemble the secrets list',
+    platform: 'android',
+    history: '1. [tap] Tapped submit → SUCCESS\n',
+  };
+  const redactingAgent = makeAgent({
+    bindings: { secrets: { TOKEN: 's' }, variables: {} },
+  });
+  const plainAgent = makeAgent();
+
+  assert.equal(
+    buildPlannerPrompt(redactingAgent, request).textPrompt,
+    buildPlannerPrompt(plainAgent, request).textPrompt,
+  );
+});
+
 // ----------------------------------------------------------------------------
 // Retry behavior for plan() and ground()
 // ----------------------------------------------------------------------------

@@ -27,7 +27,10 @@ import type { TestDefinition, RuntimeBindings } from '@finalrun/common';
 // resolved secret values from prompt TEXT back to their ${secrets.*}
 // placeholders, but screenshots reach the model provider UNREDACTED, and any
 // rendering of a secret that is not an exact value match (truncated,
-// reformatted, partially masked by the app) passes through.
+// reformatted, partially masked by the app) passes through — as does any
+// secret value shorter than MIN_REDACTABLE_SECRET_LENGTH (3 chars, in
+// repoPlaceholders.ts): redaction skips 1-2 char values everywhere rather
+// than mangle every incidental occurrence in the surrounding text.
 // redactResolvedValue also guards the write paths — report artifacts, spans,
 // error strings (reportWriter.ts, ActionExecutor._redactRuntimeString) — but
 // report screenshots are raw too. Do NOT enable full prompt logging or treat

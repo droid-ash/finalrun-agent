@@ -124,7 +124,7 @@ This change MUST NOT `git add` or commit `fab/backlog.md` at any stage. Apply co
 ### Functional Completeness
 
 - [x] A-001 R1: The rewritten `testCompiler.ts` comment scopes the guarantee to the compiled objective, states the runtime hierarchy + screenshot exposure with the concrete file chain, states where redaction is and is not wired, warns against enabling full prompt logging, and keeps the pattern-widening warning
-- [x] A-002 R3: `AIAgent` accepts optional bindings and redacts exact resolved-secret occurrences from grounder and planner prompt text (element fields pre-serialization plus the assembled text), replacing them with `${secrets.KEY}` placeholders via the reused `redactResolvedValue`
+- [x] A-002 R3: `AIAgent` accepts optional bindings and redacts exact resolved-secret occurrences from grounder and planner prompt text (element fields pre-serialization and each free-text input before assembly; deliberately no pass over the assembled text), replacing them with `${secrets.KEY}` placeholders via the reused `redactResolvedValue`
 - [x] A-003 R3: `sessionRunner.createSessionExecutor` passes `config.runtimeBindings` to the `AIAgent`, and constructing `AIAgent` without bindings leaves prompt assembly byte-identical to the pre-change behavior
 - [x] A-004 R2: The three-leg leak assessment (hierarchy mitigated, screenshot residual, deeplink inheriting both) is recorded in this plan's Design Decisions and reflected accurately in the shipped comments
 

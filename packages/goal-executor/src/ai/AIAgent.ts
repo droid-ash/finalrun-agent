@@ -254,7 +254,11 @@ export class AIAgent {
    * Screenshots are NOT redacted here and DO still carry the secret to the
    * provider — masking them needs visual field-region detection, and dropping
    * them would blind the planner. Exact-match is also the ceiling: a value the
-   * app re-renders (truncated, reformatted, partially masked) is not caught.
+   * app re-renders (truncated, reformatted, partially masked) is not caught,
+   * and values shorter than MIN_REDACTABLE_SECRET_LENGTH (3 chars, in
+   * repoPlaceholders.ts) are never redacted and reach the provider raw —
+   * the accepted trade for not corrupting arbitrary prompt text, since a
+   * 1-2 char value collides with ordinary text near-certainly.
    */
   private _redactPromptText(value: string): string {
     if (!this._bindings) return value;
