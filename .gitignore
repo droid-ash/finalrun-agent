@@ -66,3 +66,5 @@ dist/
 !fab/.fab-version
 
 .status.yaml.lock
+
+/.claude/settings.local.json
