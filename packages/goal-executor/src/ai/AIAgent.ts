@@ -864,12 +864,68 @@ export class AIAgent {
     let client: unknown;
     switch (resolved.provider) {
       case 'openai': {
-        const openai = createOpenAI({ apiKey });
-        // Use the Responses API (not Chat Completions) so that
-        // `providerOptions.openai.reasoningEffort` is honored by reasoning
-        // models like gpt-5.4-mini. `openai(modelId)` defaults to Chat
-        // Completions and silently ignores reasoning effort.
-        client = openai.responses(resolved.modelName);
+        const openaiOptions: Parameters<typeof createOpenAI>[0] = { apiKey };
+
+        // Explicit endpoint override — required when talking to Snowflake
+        // Cortex (or any OpenAI-compatible gateway) so we don't silently hit
+        // api.openai.com. `@ai-sdk/openai` also reads OPENAI_BASE_URL from env,
+        // but setting it here makes the routing explicit.
+        const baseURL = process.env.OPENAI_BASE_URL;
+        if (baseURL) {
+          openaiOptions.baseURL = baseURL;
+        }
+
+        const extraHeadersJson = process.env.OPENAI_EXTRA_HEADERS_JSON;
+        if (extraHeadersJson) {
+          try {
+            const parsed = JSON.parse(extraHeadersJson);
+            if (parsed && typeof parsed === 'object') {
+              openaiOptions.headers = parsed as Record<string, string>;
+            }
+          } catch (err) {
+            console.error(
+              'OPENAI_EXTRA_HEADERS_JSON is not valid JSON; ignoring.',
+              err,
+            );
+          }
+        }
+
+        if (process.env.FINALRUN_OPENAI_SNOWFLAKE_COMPAT === '1') {
+          const baseFetch: typeof fetch =
+            (openaiOptions.fetch as typeof fetch | undefined) ?? fetch;
+          openaiOptions.fetch = (async (input, init) => {
+            if (init && typeof init.body === 'string') {
+              try {
+                const payload = JSON.parse(init.body);
+                if (
+                  payload &&
+                  typeof payload === 'object' &&
+                  'max_tokens' in payload &&
+                  !('max_completion_tokens' in payload)
+                ) {
+                  payload.max_completion_tokens = payload.max_tokens;
+                  delete payload.max_tokens;
+                  init = { ...init, body: JSON.stringify(payload) };
+                }
+              } catch {
+                // body is not JSON; pass through unchanged
+              }
+            }
+            return baseFetch(input as Parameters<typeof fetch>[0], init);
+          }) as typeof fetch;
+        }
+
+        const openai = createOpenAI(openaiOptions);
+        
+        // Responses API is the default so reasoning models (gpt-5.4-mini, etc.)
+        // honor `providerOptions.openai.reasoningEffort`. Set
+        // FINALRUN_OPENAI_USE_CHAT=1 to force Chat Completions instead — needed
+        // for Snowflake Cortex, which only exposes the OpenAI-chat-compatible
+        // endpoint and 403s on /v1/responses.
+        client =
+          process.env.FINALRUN_OPENAI_USE_CHAT === '1'
+            ? openai.chat(resolved.modelName)
+            : openai.responses(resolved.modelName);
         break;
       }
       case 'google': {
