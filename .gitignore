@@ -52,15 +52,6 @@ pnpm-debug.log*
 
 .fab-*
 
-/.agents
-
-/.cursor
-
-/.opencode
-
-/.codex
-
-/.gemini
 dist/
 
 !fab/.fab-version
